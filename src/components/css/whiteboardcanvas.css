@@ -1,0 +1,17 @@
+.whiteboard-canvas-page {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: #fefefe;
+}
+
+.canvas-wrapper {
+  margin-top: 20px;
+  box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+  background: white;
+}
+
+.whiteboard-canvas {
+  border: 1px solid #ccc;
+  cursor: crosshair;
+}

@@ -1,0 +1,148 @@
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap');
+
+.login-page {
+  min-height: 100vh;
+  min-width: 100vw;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background: url('/background1.jpg') no-repeat center center/cover ;
+  position: relative;
+  font-family: 'Poppins', sans-serif;
+  color: #333;
+}
+
+.login-page::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: rgba(255, 255, 255, 0.1);
+  z-index: 0;
+}
+
+.login-container {
+  background: #fff;
+  padding: 48px 40px;
+  border-radius: 16px;
+  width: 360px;
+  box-shadow: 0 0 40px rgba(0, 123, 255, 0.3), 0 0 10px rgba(255, 102, 0, 0.1);
+  position: relative;
+  overflow: hidden;
+  z-index: 1;
+}
+
+.login-container::before {
+  content: '';
+  position: absolute;
+  top: -80px;
+  left: -80px;
+  width: 160px;
+  height: 160px;
+  background: #007BFF;
+  border-radius: 50%;
+  filter: blur(60px);
+  opacity: 0.15;
+  z-index: 0;
+}
+
+.login-container::after {
+  content: '';
+  position: absolute;
+  bottom: -100px;
+  right: -100px;
+  width: 180px;
+  height: 180px;
+  background: #FF6600;
+  border-radius: 50%;
+  filter: blur(80px);
+  opacity: 0.15;
+  z-index: 0;
+}
+
+.login-card {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.login-card h2 {
+  color: #D9534F;
+  margin-bottom: 30px;
+  font-size: 1.8rem;
+}
+
+.login-form {
+  width: 100%;
+}
+
+.login-form input {
+  width: 91%;
+  padding: 14px 16px;
+  margin-bottom: 24px;
+  border: 1.5px solid #ddd;
+  border-radius: 10px;
+  background: #f9f9f9;
+  color: #333;
+  font-size: 1rem;
+  transition: border-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+.login-form input::placeholder {
+  color: #aaa;
+}
+
+.login-form input:focus {
+  border-color: #007BFF;
+  box-shadow: 0 0 10px #007BFF;
+  outline: none;
+}
+
+.login-form button {
+  width: 100%;
+  padding: 14px 0;
+  border: none;
+  border-radius: 10px;
+  background: #007BFF;
+  color: white;
+  font-weight: 600;
+  font-size: 1.1rem;
+  cursor: pointer;
+  box-shadow: 0 6px 20px rgba(0, 123, 255, 0.5);
+  transition: background 0.3s ease, box-shadow 0.3s ease;
+}
+
+.login-form button:hover {
+  background: #0056b3;
+  box-shadow: 0 10px 30px rgba(0, 86, 179, 0.7);
+}
+
+.error-message {
+  color: #D9534F;
+  font-weight: 600;
+  margin-bottom: 20px;
+  text-align: center;
+  user-select: none;
+}
+
+.register-text {
+  margin-top: 28px;
+  text-align: center;
+  font-size: 0.9rem;
+  color: #666;
+}
+
+.register-text a {
+  color: #FF6600;
+  font-weight: 600;
+  text-decoration: none;
+  transition: color 0.3s ease;
+  user-select: none;
+}
+
+.register-text a:hover {
+  color: #cc5200;
+  text-decoration: underline;
+}
