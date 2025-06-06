@@ -1,4 +1,4 @@
-import React, { useRef } from "react";
+import React, { useRef, useState } from "react";
 import "../css/toolbar.css";
 
 const presetColors = [
@@ -23,6 +23,7 @@ export default function Toolbar({
   setPenWidth,
 }) {
   const hiddenColorInputRef = useRef(null);
+  const [copied, setCopied] = useState(false);
 
   const triggerColorPicker = () => {
     if (hiddenColorInputRef.current) {
@@ -32,6 +33,16 @@ export default function Toolbar({
 
   const handleColorChange = (e) => {
     setPenColor(e.target.value);
+  };
+
+  const handleCopyLink = async () => {
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      alert("Failed to copy link.");
+    }
   };
 
   return (
@@ -81,7 +92,7 @@ export default function Toolbar({
             title="Pick a custom color"
           >
             <img
-              src="/colorpicker.jpg"
+              src="/colorpicker.png"
               alt="Color Picker"
               className="color-picker-icon"
             />
@@ -95,21 +106,30 @@ export default function Toolbar({
             className="hidden-color-picker"
           />
         </div>
+        <label className="toolbar-label">
+          <input
+            type="range"
+            min="1"
+            max="20"
+            value={penWidth}
+            onChange={(e) => setPenWidth(Number(e.target.value))}
+            className="thickness-slider"
+            title="Pen Thickness"
+          />
+          <span className="thickness-value">{penWidth}px</span>
+        </label>
       </div>
+      <div className="spacer" />
+      <button
+        onClick={handleCopyLink}
+        className="icon-button"
+        title="Copy Shareable Link"
+      >
+        🔗
+      </button>
+      {copied && <span className="copied-message">Link copied!</span>}
 
       {/* Pen thickness slider */}
-      <label className="toolbar-label">
-        <input
-          type="range"
-          min="1"
-          max="20"
-          value={penWidth}
-          onChange={(e) => setPenWidth(Number(e.target.value))}
-          className="thickness-slider"
-          title="Pen Thickness"
-        />
-        <span className="thickness-value">{penWidth}px</span>
-      </label>
     </div>
   );
 }

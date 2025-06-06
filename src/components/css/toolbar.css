@@ -138,3 +138,14 @@
   position: relative;
   display: inline-block;
 }
+
+.spacer {
+  flex-grow: 1;
+}
+
+.copied-message {
+  font-size: 0.85rem;
+  color: green;
+  margin-left: 8px;
+  animation: fadeOut 2s forwards;
+}

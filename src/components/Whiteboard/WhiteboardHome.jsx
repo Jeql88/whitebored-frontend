@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { getWhiteboards, createWhiteboard } from "../../api/whiteboard";
+import { getWhiteboards, createWhiteboard, deleteWhiteboard, updateWhiteboard } from "../../api/whiteboard";
 import WhiteboardCard from "./WhiteBoardCard.jsx";
 import "../css/whiteboardhome.css";
 
@@ -34,6 +34,16 @@ export default function WhiteboardHome() {
 
     return () => clearTimeout(delay);
   }, [searchTerm, whiteboards]);
+
+  const handleDelete = (id) => {
+    setWhiteboards(prev => prev.filter(wb => wb._id !== id));
+    setFilteredBoards(prev => prev.filter(wb => wb._id !== id));
+  };
+
+  const handleRename = (id, newName) => {
+    setWhiteboards(prev => prev.map(wb => wb._id === id ? { ...wb, name: newName } : wb));
+    setFilteredBoards(prev => prev.map(wb => wb._id === id ? { ...wb, name: newName } : wb));
+  };
 
   const handleCreate = async (e) => {
     e.preventDefault();
@@ -101,20 +111,25 @@ export default function WhiteboardHome() {
       </div>
 
       <div className="whiteboard-grid">
-        <div
-          className="whiteboard-card create-card"
-          onClick={() => setShowPopup(true)}
-        >
-          <div className="whiteboard-preview">
-            <span className="preview-placeholder">➕</span>
-          </div>
-          <div className="whiteboard-name">Create New</div>
+      <div
+        className="whiteboard-card create-card"
+        onClick={() => setShowPopup(true)}
+      >
+        <div className="whiteboard-preview">
+          <span className="preview-placeholder">➕</span>
         </div>
-
-        {filteredBoards.map((wb) => (
-          <WhiteboardCard key={wb._id} whiteboard={wb} />
-        ))}
+        <div className="whiteboard-name">Create New</div>
       </div>
+
+      {filteredBoards.map((wb) => (
+        <WhiteboardCard
+          key={wb._id}
+          whiteboard={wb}
+          onDelete={handleDelete}
+          onRename={handleRename}
+        />
+      ))}
+    </div>
     </div>
   );
 }
