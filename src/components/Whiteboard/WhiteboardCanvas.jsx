@@ -3,12 +3,21 @@ import { useParams, useNavigate } from "react-router-dom";
 import { io } from "socket.io-client";
 import Toolbar from "./ToolBar.jsx";
 import "../css/whiteboardcanvas.css";
+import ChatBox from "../Chatbox";
 
 function getUserIdFromToken(token) {
   try {
     return JSON.parse(atob(token.split(".")[1])).userId;
   } catch {
     return null;
+  }
+}
+function getUserFromToken(token) {
+  try {
+    const payload = JSON.parse(atob(token.split(".")[1]));
+    return { userId: payload.userId, username: payload.username };
+  } catch {
+    return { userId: null, username: "Guest" };
   }
 }
 
@@ -23,15 +32,17 @@ export default function WhiteboardCanvas() {
   const strokePoints = useRef([]);
   const drawing = useRef(false);
   const userId = useRef(null);
+  const user = useRef({ userId: null, username: "Guest" });
+const [whiteboardName, setWhiteboardName] = useState("Whiteboard");
 
   // Tool states
   const [isPen, setIsPen] = useState(true);
-  const [penColor, setPenColor] = useState("black");
+  const [penColor, setPenColor] = useState("#000000");
   const [penWidth, setPenWidth] = useState(2);
   const [isEraser, setIsEraser] = useState(false);
   const [eraserWidth, setEraserWidth] = useState(20);
   const [isTextTool, setIsTextTool] = useState(false);
-
+  const [collaborators, setCollaborators] = useState([]);
   // Text box states
   const [creatingTextBox, setCreatingTextBox] = useState(false);
   const [textBoxStart, setTextBoxStart] = useState(null);
@@ -42,6 +53,33 @@ export default function WhiteboardCanvas() {
   const [draggingBoxId, setDraggingBoxId] = useState(null);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
 
+  function getColorForName(name) {
+  // Simple hash to pick a color from a palette
+  const colors = [
+    "#2563eb", "#f59e42", "#10b981", "#f43f5e", "#a21caf", "#eab308", "#0ea5e9", "#6366f1"
+  ];
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  return colors[Math.abs(hash) % colors.length];
+}
+useEffect(() => {
+    async function fetchWhiteboardName() {
+      try {
+        const token = localStorage.getItem("token");
+        const res = await fetch(`http://localhost:4000/whiteboards`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+        if (res.ok) {
+          const boards = await res.json();
+          const board = boards.find((b) => b._id === whiteboardId);
+          if (board && board.name) setWhiteboardName(board.name);
+        }
+      } catch {}
+    }
+    fetchWhiteboardName();
+  }, [whiteboardId]);
   useEffect(() => {
     if (isPen) {
       setIsEraser(false);
@@ -104,7 +142,16 @@ export default function WhiteboardCanvas() {
     setSocket(newSocket);
 
     newSocket.emit("joinWhiteboard", whiteboardId);
+    newSocket.on("whiteboardUsers", (users) => {
+    setCollaborators(users);
+  });
 
+  // On connect, announce yourself
+  newSocket.emit("presence", {
+    whiteboardId,
+    userId: user.current.userId,
+    username: user.current.username,
+  });
     const canvas = canvasRef.current;
     const context = canvas.getContext("2d");
 
@@ -172,7 +219,20 @@ export default function WhiteboardCanvas() {
       newSocket.disconnect();
     };
   }, [whiteboardId, navigate]);
-
+    useEffect(() => {
+    const token = localStorage.getItem("token");
+    let guest = false;
+    if (!token) {
+      guest = true;
+      user.current = {
+        userId: "guest-" + Math.random().toString(36).slice(2, 10),
+        username: "Guest",
+      };
+    } else {
+      user.current = getUserFromToken(token);
+    }
+    // ...rest of your socket logic...
+  }, [whiteboardId, navigate]);
   // Redraw on state change
   useEffect(() => {
     redraw(strokes, textBoxes);
@@ -420,136 +480,248 @@ export default function WhiteboardCanvas() {
   }, [isTextTool, editingTextBoxId, currentTextBox, creatingTextBox]);
 
   return (
-    
-    <div className="whiteboard-canvas-page">
-      {userId.current && userId.current.startsWith("guest-") && (
-        <div style={{background: "#ffeeba", padding: 8, textAlign: "center"}}>
-          You are editing as a guest. <a href="/login">Login</a> to save your boards!
-        </div>
-      )}
-      <Toolbar
-        onBack={() => navigate("/whiteboards", { state: { refresh: true } })}
-        onUndo={handleUndo}
-        onRedo={handleRedo}
-        onClear={handleClear}
-        penColor={penColor}
-        setPenColor={setPenColor}
-        penWidth={penWidth}
-        setPenWidth={setPenWidth}
-        isPen={isPen}
-        setIsPen={setIsPen}
-        isEraser={isEraser}
-        setIsEraser={setIsEraser}
-        isTextTool={isTextTool}
-        setIsTextTool={setIsTextTool}
-        eraserWidth={eraserWidth}
-        setEraserWidth={setEraserWidth}
-      />
-      <div className="canvas-wrapper" style={{ position: "relative" }}>
-        <canvas
-          ref={canvasRef}
-          width={800}
-          height={600}
-          className="whiteboard-canvas"
+  <div className="whiteboard-canvas-page">
+    {userId.current && userId.current.startsWith("guest-") && (
+      <div style={{ background: "#ffeeba", padding: 8, textAlign: "center" }}>
+        You are editing as a guest. <a href="/login">Login</a> to save your boards!
+      </div>
+    )}
+    {/* Google Docs style top bar */}
+    <div
+      style={{
+        width: "100%",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        background: "#f7f7f7",
+        borderBottom: "1px solid #ddd",
+        position: "sticky",
+        top: 0,
+        zIndex: 10,
+        padding: "0 24px",
+        minHeight: 64,
+      }}
+    >
+      {/* Editable whiteboard name */}
+      <div style={{ display: "flex", alignItems: "center", minWidth: 220 }}>
+        <input
+          value={whiteboardName}
+          onChange={e => setWhiteboardName(e.target.value)}
+          onBlur={async () => {
+            try {
+              await fetch(`http://localhost:4000/whiteboards/${whiteboardId}`, {
+                method: "PATCH",
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${localStorage.getItem("token")}`,
+                },
+                body: JSON.stringify({ name: whiteboardName }),
+              });
+            } catch {}
+          }}
+          style={{
+            fontSize: 22,
+            fontWeight: 700,
+            border: "none",
+            background: "transparent",
+            outline: "none",
+            minWidth: 120,
+            maxWidth: 320,
+            color: "#222",
+            padding: "8px 0",
+          }}
         />
-        {/* Text box overlays for selection, editing, and moving */}
-        {textBoxes.map((box) => (
+      </div>
+      {/* Toolbar */}
+      <div style={{ flex: 1, margin: "0 24px", display: "flex", justifyContent: "center" }}>
+        <Toolbar
+          onBack={() => navigate("/whiteboards", { state: { refresh: true } })}
+          onUndo={handleUndo}
+          onRedo={handleRedo}
+          onClear={handleClear}
+          penColor={penColor}
+          setPenColor={setPenColor}
+          penWidth={penWidth}
+          setPenWidth={setPenWidth}
+          isPen={isPen}
+          setIsPen={setIsPen}
+          isEraser={isEraser}
+          setIsEraser={setIsEraser}
+          isTextTool={isTextTool}
+          setIsTextTool={setIsTextTool}
+          eraserWidth={eraserWidth}
+          setEraserWidth={setEraserWidth}
+        />
+      </div>
+      {/* Collaborators */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          minWidth: 80,
+        }}
+      >
+        {collaborators.map((u) => (
           <div
-            key={box._id}
+            key={u.userId}
+            title={u.username || "Guest"}
             style={{
-              position: "absolute",
-              left: box.x,
-              top: box.y,
-              width: box.width || 120,
-              height: box.height || 30,
-              border:
-                selectedTextBoxId === box._id
-                  ? "2px solid #ff9800"
-                  : "1px dashed transparent",
-              background: "transparent",
-              zIndex: 8,
-              cursor: draggingBoxId === box._id ? "grabbing" : "pointer",
-              pointerEvents: isTextTool ? "auto" : "none",
-            }}
-            onClick={(e) => {
-              e.stopPropagation();
-              setSelectedTextBoxId(box._id);
-            }}
-            onDoubleClick={(e) => {
-              e.stopPropagation();
-              setEditingTextBoxId(box._id);
-              setCurrentTextBox(box);
-              setTextInput(box.text);
-            }}
-            onMouseDown={(e) => {
-              if (selectedTextBoxId === box._id && !editingTextBoxId) {
-                setDraggingBoxId(box._id);
-                setDragOffset({
-                  x: e.clientX - box.x - canvasRef.current.getBoundingClientRect().left,
-                  y: e.clientY - box.y - canvasRef.current.getBoundingClientRect().top,
-                });
-              }
-            }}
-          />
-        ))}
-
-        {/* Text box overlay for typing or editing */}
-        {(isTextTool && currentTextBox && !creatingTextBox) ||
-        editingTextBoxId ? (
-          <form
-            onSubmit={handleTextSubmit}
-            style={{
-              position: "absolute",
-              left: currentTextBox?.x,
-              top: currentTextBox?.y,
-              width: currentTextBox?.width || 120,
-              height: currentTextBox?.height || 30,
-              background: "rgba(255,255,255,0.8)",
-              border: "1px dashed #aaa",
-              zIndex: 10,
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              marginLeft: 4,
             }}
           >
-            <input
-              id="canvas-text-input"
-              type="text"
-              value={textInput}
-              onChange={(e) => setTextInput(e.target.value)}
+            <div
               style={{
-                width: "100%",
-                height: "100%",
-                fontSize: Math.max(
-                  16,
-                  Math.floor(currentTextBox?.height || 20)
-                ),
-                border: "none",
-                background: "transparent",
-                outline: "none",
+                width: 32,
+                height: 32,
+                borderRadius: "50%",
+                background: getColorForName(u.username || "Guest"),
+                color: "#fff",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontWeight: 700,
+                fontSize: 16,
+                border: "2px solid #fff",
+                boxShadow: "0 1px 4px rgba(0,0,0,0.08)",
+                marginBottom: 2,
+                transition: "transform 0.15s",
               }}
-              autoFocus
-              onBlur={() => {
-                handleTextSubmit();
+            >
+              {(u.username || "G")[0].toUpperCase()}
+            </div>
+            <span
+              style={{
+                fontSize: 11,
+                color: "#444",
+                fontWeight: 500,
+                maxWidth: 48,
+                textAlign: "center",
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
               }}
-            />
-          </form>
-        ) : null}
-
-        {/* Draw rectangle while dragging for text box */}
-        {isTextTool && creatingTextBox && currentTextBox && (
-          <div
-            style={{
-              position: "absolute",
-              left: currentTextBox.x,
-              top: currentTextBox.y,
-              width: currentTextBox.width,
-              height: currentTextBox.height,
-              border: "1px dashed #888",
-              background: "rgba(255,255,255,0.3)",
-              pointerEvents: "none",
-              zIndex: 5,
-            }}
-          />
-        )}
+            >
+              {u.username || "Guest"}
+            </span>
+          </div>
+        ))}
       </div>
     </div>
-  );
+    <div className="canvas-wrapper" style={{ position: "relative" }}>
+      <canvas
+        ref={canvasRef}
+        width={800}
+        height={600}
+        className="whiteboard-canvas"
+      />
+      {/* Text box overlays for selection, editing, and moving */}
+      {textBoxes.map((box) => (
+        <div
+          key={box._id}
+          style={{
+            position: "absolute",
+            left: box.x,
+            top: box.y,
+            width: box.width || 120,
+            height: box.height || 30,
+            border:
+              selectedTextBoxId === box._id
+                ? "2px solid #ff9800"
+                : "1px dashed transparent",
+            background: "transparent",
+            zIndex: 8,
+            cursor: draggingBoxId === box._id ? "grabbing" : "pointer",
+            pointerEvents: isTextTool ? "auto" : "none",
+          }}
+          onClick={(e) => {
+            e.stopPropagation();
+            setSelectedTextBoxId(box._id);
+          }}
+          onDoubleClick={(e) => {
+            e.stopPropagation();
+            setEditingTextBoxId(box._id);
+            setCurrentTextBox(box);
+            setTextInput(box.text);
+          }}
+          onMouseDown={(e) => {
+            if (selectedTextBoxId === box._id && !editingTextBoxId) {
+              setDraggingBoxId(box._id);
+              setDragOffset({
+                x: e.clientX - box.x - canvasRef.current.getBoundingClientRect().left,
+                y: e.clientY - box.y - canvasRef.current.getBoundingClientRect().top,
+              });
+            }
+          }}
+        />
+      ))}
+
+      {/* Text box overlay for typing or editing */}
+      {(isTextTool && currentTextBox && !creatingTextBox) ||
+      editingTextBoxId ? (
+        <form
+          onSubmit={handleTextSubmit}
+          style={{
+            position: "absolute",
+            left: currentTextBox?.x,
+            top: currentTextBox?.y,
+            width: currentTextBox?.width || 120,
+            height: currentTextBox?.height || 30,
+            background: "rgba(255,255,255,0.8)",
+            border: "1px dashed #aaa",
+            zIndex: 10,
+          }}
+        >
+          <input
+            id="canvas-text-input"
+            type="text"
+            value={textInput}
+            onChange={(e) => setTextInput(e.target.value)}
+            style={{
+              width: "100%",
+              height: "100%",
+              fontSize: Math.max(
+                16,
+                Math.floor(currentTextBox?.height || 20)
+              ),
+              border: "none",
+              background: "transparent",
+              outline: "none",
+            }}
+            autoFocus
+            onBlur={() => {
+              handleTextSubmit();
+            }}
+          />
+        </form>
+      ) : null}
+
+      {/* Draw rectangle while dragging for text box */}
+      {isTextTool && creatingTextBox && currentTextBox && (
+        <div
+          style={{
+            position: "absolute",
+            left: currentTextBox.x,
+            top: currentTextBox.y,
+            width: currentTextBox.width,
+            height: currentTextBox.height,
+            border: "1px dashed #888",
+            background: "rgba(255,255,255,0.3)",
+            pointerEvents: "none",
+            zIndex: 5,
+          }}
+        />
+      )}
+    </div>
+    <ChatBox
+      socket={socket}
+      userId={user.current.userId}
+      username={user.current.username}
+      whiteboardId={whiteboardId}
+    />
+  </div>
+);
 }
