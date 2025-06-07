@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   getWhiteboards,
@@ -10,6 +10,19 @@ import WhiteboardCard from "./WhiteBoardCard.jsx";
 import "../css/whiteboardhome.css";
 import { useLocation } from "react-router-dom";
 
+// Helper to get userId from JWT in localStorage
+function getUserIdFromToken() {
+  const token = localStorage.getItem("token");
+  if (!token) return null;
+  try {
+    return JSON.parse(atob(token.split(".")[1])).userId;
+  } catch {
+    return null;
+  }
+}
+
+const DISPLAY_LIMIT = 5;
+
 export default function WhiteboardHome() {
   const [whiteboards, setWhiteboards] = useState([]);
   const [filteredBoards, setFilteredBoards] = useState([]);
@@ -18,6 +31,12 @@ export default function WhiteboardHome() {
   const navigate = useNavigate();
   const [showPopup, setShowPopup] = useState(false);
   const location = useLocation();
+
+  // Show more/less state
+  const [showAllOwned, setShowAllOwned] = useState(false);
+  const [showAllShared, setShowAllShared] = useState(false);
+
+  const currentUserId = getUserIdFromToken();
 
   useEffect(() => {
     getWhiteboards().then((data) => {
@@ -37,7 +56,7 @@ export default function WhiteboardHome() {
           whiteboards.filter((wb) => wb.name.toLowerCase().includes(term))
         );
       }
-    }, 400); // Delay in ms
+    }, 400);
 
     return () => clearTimeout(delay);
   }, [searchTerm, whiteboards]);
@@ -48,10 +67,29 @@ export default function WhiteboardHome() {
         setWhiteboards(data);
         setFilteredBoards(data);
       });
-      // Remove the refresh flag so it doesn't refetch every render
       window.history.replaceState({}, document.title);
     }
   }, [location.state]);
+
+  // Reset toggles only when search term changes
+  useEffect(() => {
+    setShowAllOwned(false);
+    setShowAllShared(false);
+  }, [searchTerm]);
+
+  // Memoize ownedBoards and sharedBoards for stable references
+  const ownedBoards = useMemo(
+    () => filteredBoards.filter((wb) => wb.userId === currentUserId),
+    [filteredBoards, currentUserId]
+  );
+  const sharedBoards = useMemo(
+    () => filteredBoards.filter((wb) => wb.userId !== currentUserId),
+    [filteredBoards, currentUserId]
+  );
+
+  // Sliced arrays for display
+  const ownedToShow = showAllOwned ? ownedBoards : ownedBoards.slice(0, DISPLAY_LIMIT);
+  const sharedToShow = showAllShared ? sharedBoards : sharedBoards.slice(0, DISPLAY_LIMIT);
 
   const handleDelete = (id) => {
     setWhiteboards((prev) => prev.filter((wb) => wb._id !== id));
@@ -137,26 +175,90 @@ export default function WhiteboardHome() {
         />
       </div>
 
-      <div className="whiteboard-grid">
-        <div
-          className="whiteboard-card create-card"
-          onClick={() => setShowPopup(true)}
-        >
-          <div className="whiteboard-preview">
-            <span className="preview-placeholder">➕</span>
+      {/* Your Whiteboards Section */}
+      <section style={{ width: "100%", maxWidth: 960, marginBottom: 32 }}>
+        <h3 style={{ margin: "24px 0 12px 0", color: "#007bff" }}>Your Whiteboards</h3>
+        <div className="whiteboard-grid">
+          <div
+            className="whiteboard-card create-card"
+            onClick={() => setShowPopup(true)}
+          >
+            <div className="whiteboard-preview">
+              <span className="preview-placeholder">➕</span>
+            </div>
+            <div className="whiteboard-name">Create New</div>
           </div>
-          <div className="whiteboard-name">Create New</div>
+          {ownedBoards.length === 0 && (
+            <div style={{ gridColumn: "1/-1", color: "#888", textAlign: "center", marginTop: 24 }}>
+              No whiteboards yet. Create one!
+            </div>
+          )}
+          {ownedToShow.map((wb) => (
+            <WhiteboardCard
+              key={wb._id}
+              whiteboard={wb}
+              onDelete={handleDelete}
+              onRename={handleRename}
+            />
+          ))}
         </div>
+        {ownedBoards.length > DISPLAY_LIMIT && (
+          <div style={{ textAlign: "center", marginTop: 16 }}>
+            <button
+              className="btn"
+              style={{
+                fontWeight: 600,
+                fontSize: "1rem",
+                position: "relative",
+                zIndex: 10,
+              }}
+              onClick={() => setShowAllOwned((v) => !v)}
+            >
+              {showAllOwned
+                ? "Show Less"
+                : `Show More (${ownedBoards.length - DISPLAY_LIMIT} more)`}
+            </button>
+          </div>
+        )}
+      </section>
 
-        {filteredBoards.map((wb) => (
-          <WhiteboardCard
-            key={wb._id}
-            whiteboard={wb}
-            onDelete={handleDelete}
-            onRename={handleRename}
-          />
-        ))}
-      </div>
+      {/* Shared With You Section */}
+      <section style={{ width: "100%", maxWidth: 960 }}>
+        <h3 style={{ margin: "24px 0 12px 0", color: "#ff6600" }}>Whiteboards Shared With You</h3>
+        <div className="whiteboard-grid">
+          {sharedBoards.length === 0 && (
+            <div style={{ gridColumn: "1/-1", color: "#888", textAlign: "center", marginTop: 24 }}>
+              No shared whiteboards yet.
+            </div>
+          )}
+          {sharedToShow.map((wb) => (
+            <WhiteboardCard
+              key={wb._id}
+              whiteboard={wb}
+              onDelete={handleDelete}
+              onRename={handleRename}
+            />
+          ))}
+        </div>
+        {sharedBoards.length > DISPLAY_LIMIT && (
+          <div style={{ textAlign: "center", marginTop: 16 }}>
+            <button
+              className="btn"
+              style={{
+                fontWeight: 600,
+                fontSize: "1rem",
+                position: "relative",
+                zIndex: 10,
+              }}
+              onClick={() => setShowAllShared((v) => !v)}
+            >
+              {showAllShared
+                ? "Show Less"
+                : `Show More (${sharedBoards.length - DISPLAY_LIMIT} more)`}
+            </button>
+          </div>
+        )}
+      </section>
     </div>
   );
 }

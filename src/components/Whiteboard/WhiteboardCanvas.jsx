@@ -88,13 +88,19 @@ export default function WhiteboardCanvas() {
 
   useEffect(() => {
     const token = localStorage.getItem("token");
+    let guest = false;
     if (!token) {
-      navigate("/login");
-      return;
+      guest = true;
+      // Optionally, set a guest userId (e.g., random or "guest")
+      userId.current = "guest-" + Math.random().toString(36).slice(2, 10);
+    } else {
+      userId.current = getUserIdFromToken(token);
     }
-    userId.current = getUserIdFromToken(token);
 
-    const newSocket = io("http://localhost:4000", { auth: { token } });
+    // Connect with or without auth
+    const newSocket = guest
+      ? io("http://localhost:4000")
+      : io("http://localhost:4000", { auth: { token } });
     setSocket(newSocket);
 
     newSocket.emit("joinWhiteboard", whiteboardId);
@@ -414,7 +420,13 @@ export default function WhiteboardCanvas() {
   }, [isTextTool, editingTextBoxId, currentTextBox, creatingTextBox]);
 
   return (
+    
     <div className="whiteboard-canvas-page">
+      {userId.current && userId.current.startsWith("guest-") && (
+        <div style={{background: "#ffeeba", padding: 8, textAlign: "center"}}>
+          You are editing as a guest. <a href="/login">Login</a> to save your boards!
+        </div>
+      )}
       <Toolbar
         onBack={() => navigate("/whiteboards", { state: { refresh: true } })}
         onUndo={handleUndo}

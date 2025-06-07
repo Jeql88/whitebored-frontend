@@ -4,11 +4,24 @@ import { deleteWhiteboard, updateWhiteboard } from "../../api/whiteboard";
 import "../css/whiteboardcard.css";
 import { formatDistanceToNow } from "date-fns";
 
+// Helper to get userId from JWT in localStorage
+function getUserIdFromToken() {
+  const token = localStorage.getItem("token");
+  if (!token) return null;
+  try {
+    return JSON.parse(atob(token.split(".")[1])).userId;
+  } catch {
+    return null;
+  }
+}
+
 export default function WhiteboardCard({ whiteboard, onDelete, onRename }) {
   const navigate = useNavigate();
   const [editing, setEditing] = useState(false);
   const [newName, setNewName] = useState(whiteboard.name);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+
+  const currentUserId = getUserIdFromToken();
 
   const handleDelete = async () => {
     await deleteWhiteboard(whiteboard._id);
@@ -38,6 +51,21 @@ export default function WhiteboardCard({ whiteboard, onDelete, onRename }) {
 
         <div className="whiteboard1-name">
           {whiteboard.name}
+          {whiteboard.userId !== currentUserId && (
+            <span
+              style={{
+                color: "#007bff",
+                fontSize: "0.85rem",
+                marginLeft: 8,
+                fontWeight: 600,
+                background: "#e6f0ff",
+                borderRadius: 6,
+                padding: "2px 8px",
+              }}
+            >
+              Shared with you
+            </span>
+          )}
           <p style={{ fontSize: "0.8rem", color: "#888", marginTop: "4px" }}>
             Last edited:{" "}
             {whiteboard.updatedAt && !isNaN(new Date(whiteboard.updatedAt))

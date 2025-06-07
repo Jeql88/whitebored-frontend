@@ -19,7 +19,7 @@ function App() {
         />
         <Route
           path="/whiteboard/:id"
-          element={token ? <WhiteboardCanvas /> : <Navigate to="/login" />}
+          element={<WhiteboardCanvas />} // Allow both guests and users
         />
         <Route path="*" element={<Navigate to={token ? "/whiteboards" : "/login"} />} />
       </Routes>
