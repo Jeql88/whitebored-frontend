@@ -1,8 +1,14 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { getWhiteboards, createWhiteboard, deleteWhiteboard, updateWhiteboard } from "../../api/whiteboard";
+import {
+  getWhiteboards,
+  createWhiteboard,
+  deleteWhiteboard,
+  updateWhiteboard,
+} from "../../api/whiteboard";
 import WhiteboardCard from "./WhiteBoardCard.jsx";
 import "../css/whiteboardhome.css";
+import { useLocation } from "react-router-dom";
 
 export default function WhiteboardHome() {
   const [whiteboards, setWhiteboards] = useState([]);
@@ -11,6 +17,7 @@ export default function WhiteboardHome() {
   const [searchTerm, setSearchTerm] = useState("");
   const navigate = useNavigate();
   const [showPopup, setShowPopup] = useState(false);
+  const location = useLocation();
 
   useEffect(() => {
     getWhiteboards().then((data) => {
@@ -35,14 +42,34 @@ export default function WhiteboardHome() {
     return () => clearTimeout(delay);
   }, [searchTerm, whiteboards]);
 
+  useEffect(() => {
+    if (location.state?.refresh) {
+      getWhiteboards().then((data) => {
+        setWhiteboards(data);
+        setFilteredBoards(data);
+      });
+      // Remove the refresh flag so it doesn't refetch every render
+      window.history.replaceState({}, document.title);
+    }
+  }, [location.state]);
+
   const handleDelete = (id) => {
-    setWhiteboards(prev => prev.filter(wb => wb._id !== id));
-    setFilteredBoards(prev => prev.filter(wb => wb._id !== id));
+    setWhiteboards((prev) => prev.filter((wb) => wb._id !== id));
+    setFilteredBoards((prev) => prev.filter((wb) => wb._id !== id));
   };
 
-  const handleRename = (id, newName) => {
-    setWhiteboards(prev => prev.map(wb => wb._id === id ? { ...wb, name: newName } : wb));
-    setFilteredBoards(prev => prev.map(wb => wb._id === id ? { ...wb, name: newName } : wb));
+  const handleRename = (id, newName, updatedAt) => {
+    setWhiteboards((prev) =>
+      [...prev]
+        .map((wb) => (wb._id === id ? { ...wb, name: newName, updatedAt } : wb))
+        .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))
+    );
+
+    setFilteredBoards((prev) =>
+      [...prev]
+        .map((wb) => (wb._id === id ? { ...wb, name: newName, updatedAt } : wb))
+        .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))
+    );
   };
 
   const handleCreate = async (e) => {
@@ -111,25 +138,25 @@ export default function WhiteboardHome() {
       </div>
 
       <div className="whiteboard-grid">
-      <div
-        className="whiteboard-card create-card"
-        onClick={() => setShowPopup(true)}
-      >
-        <div className="whiteboard-preview">
-          <span className="preview-placeholder">➕</span>
+        <div
+          className="whiteboard-card create-card"
+          onClick={() => setShowPopup(true)}
+        >
+          <div className="whiteboard-preview">
+            <span className="preview-placeholder">➕</span>
+          </div>
+          <div className="whiteboard-name">Create New</div>
         </div>
-        <div className="whiteboard-name">Create New</div>
-      </div>
 
-      {filteredBoards.map((wb) => (
-        <WhiteboardCard
-          key={wb._id}
-          whiteboard={wb}
-          onDelete={handleDelete}
-          onRename={handleRename}
-        />
-      ))}
-    </div>
+        {filteredBoards.map((wb) => (
+          <WhiteboardCard
+            key={wb._id}
+            whiteboard={wb}
+            onDelete={handleDelete}
+            onRename={handleRename}
+          />
+        ))}
+      </div>
     </div>
   );
 }

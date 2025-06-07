@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { deleteWhiteboard, updateWhiteboard } from "../../api/whiteboard";
 import "../css/whiteboardcard.css";
+import { formatDistanceToNow } from "date-fns";
 
 export default function WhiteboardCard({ whiteboard, onDelete, onRename }) {
   const navigate = useNavigate();
@@ -18,7 +19,7 @@ export default function WhiteboardCard({ whiteboard, onDelete, onRename }) {
   const handleRename = async () => {
     if (newName.trim() && newName !== whiteboard.name) {
       await updateWhiteboard(whiteboard._id, newName);
-      onRename(whiteboard._id, newName);
+      onRename(whiteboard._id, newName, new Date().toISOString());
     }
     setEditing(false);
   };
@@ -37,6 +38,12 @@ export default function WhiteboardCard({ whiteboard, onDelete, onRename }) {
 
         <div className="whiteboard1-name">
           {whiteboard.name}
+          <p style={{ fontSize: "0.8rem", color: "#888", marginTop: "4px" }}>
+            Last edited:{" "}
+            {whiteboard.updatedAt && !isNaN(new Date(whiteboard.updatedAt))
+              ? formatDistanceToNow(new Date(whiteboard.updatedAt)) + " ago"
+              : "unknown"}
+          </p>
         </div>
 
         <div
@@ -84,15 +91,24 @@ export default function WhiteboardCard({ whiteboard, onDelete, onRename }) {
 
       {/* Delete Confirmation Modal */}
       {showDeleteConfirm && (
-        <div className="modal-overlay" onClick={() => setShowDeleteConfirm(false)}>
+        <div
+          className="modal-overlay"
+          onClick={() => setShowDeleteConfirm(false)}
+        >
           <div className="modal-popup" onClick={(e) => e.stopPropagation()}>
             <h3>Delete Whiteboard</h3>
-            <p>Are you sure you want to delete <strong>{whiteboard.name}</strong>?</p>
+            <p>
+              Are you sure you want to delete <strong>{whiteboard.name}</strong>
+              ?
+            </p>
             <div className="modal-buttons">
               <button className="btn danger" onClick={handleDelete}>
                 Delete
               </button>
-              <button className="btn" onClick={() => setShowDeleteConfirm(false)}>
+              <button
+                className="btn"
+                onClick={() => setShowDeleteConfirm(false)}
+              >
                 Cancel
               </button>
             </div>
