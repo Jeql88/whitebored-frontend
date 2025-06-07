@@ -4,12 +4,21 @@ import { io } from "socket.io-client";
 import Toolbar from "./ToolBar.jsx";
 import CommentsSidebar from "./CommentsSidebar.jsx";
 import "../css/whiteboardcanvas.css";
+import ChatBox from "../Chatbox";
 
 function getUserIdFromToken(token) {
   try {
     return JSON.parse(atob(token.split(".")[1])).userId;
   } catch {
     return null;
+  }
+}
+function getUserFromToken(token) {
+  try {
+    const payload = JSON.parse(atob(token.split(".")[1]));
+    return { userId: payload.userId, username: payload.username };
+  } catch {
+    return { userId: null, username: "Guest" };
   }
 }
 
@@ -24,15 +33,17 @@ export default function WhiteboardCanvas() {
   const strokePoints = useRef([]);
   const drawing = useRef(false);
   const userId = useRef(null);
+  const user = useRef({ userId: null, username: "Guest" });
+  const [whiteboardName, setWhiteboardName] = useState("Whiteboard");
 
   // Tool states
   const [isPen, setIsPen] = useState(true);
-  const [penColor, setPenColor] = useState("black");
+  const [penColor, setPenColor] = useState("#000000");
   const [penWidth, setPenWidth] = useState(2);
   const [isEraser, setIsEraser] = useState(false);
   const [eraserWidth, setEraserWidth] = useState(20);
   const [isTextTool, setIsTextTool] = useState(false);
-
+  const [collaborators, setCollaborators] = useState([]);
   // Text box states
   const [creatingTextBox, setCreatingTextBox] = useState(false);
   const [textBoxStart, setTextBoxStart] = useState(null);
@@ -44,6 +55,37 @@ export default function WhiteboardCanvas() {
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
   const [commentsOpen, setCommentsOpen] = useState(false);
 
+  function getColorForName(name) {
+    // Simple hash to pick a color from a palette
+    const colors = [
+      "#2563eb", "#f59e42", "#10b981", "#f43f5e", "#a21caf", "#eab308", "#0ea5e9", "#6366f1"
+    ];
+    let hash = 0;
+    for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
+    return colors[Math.abs(hash) % colors.length];
+  }
+
+  // Fetch whiteboard name
+  useEffect(() => {
+    async function fetchWhiteboardName() {
+      try {
+        const token = localStorage.getItem("token");
+        const res = await fetch(`http://localhost:4000/whiteboards`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+        if (res.ok) {
+          const boards = await res.json();
+          const board = boards.find((b) => b._id === whiteboardId);
+          if (board && board.name) setWhiteboardName(board.name);
+        }
+      } catch {}
+    }
+    fetchWhiteboardName();
+  }, [whiteboardId]);
+
+  // Tool switching logic
   useEffect(() => {
     if (isPen) {
       setIsEraser(false);
@@ -88,15 +130,17 @@ export default function WhiteboardCanvas() {
     }
   };
 
+  // Set user info and connect socket
   useEffect(() => {
     const token = localStorage.getItem("token");
     let guest = false;
     if (!token) {
       guest = true;
-      // Optionally, set a guest userId (e.g., random or "guest")
       userId.current = "guest-" + Math.random().toString(36).slice(2, 10);
+      user.current = { userId: userId.current, username: "Guest" };
     } else {
       userId.current = getUserIdFromToken(token);
+      user.current = getUserFromToken(token);
     }
 
     // Connect with or without auth
@@ -106,6 +150,17 @@ export default function WhiteboardCanvas() {
     setSocket(newSocket);
 
     newSocket.emit("joinWhiteboard", whiteboardId);
+
+    newSocket.on("whiteboardUsers", (users) => {
+      setCollaborators(users);
+    });
+
+    // On connect, announce yourself
+    newSocket.emit("presence", {
+      whiteboardId,
+      userId: user.current.userId,
+      username: user.current.username,
+    });
 
     const canvas = canvasRef.current;
     const context = canvas.getContext("2d");
@@ -350,7 +405,7 @@ export default function WhiteboardCanvas() {
 
   // Handle text input submit (edit or create)
   const handleTextSubmit = (e) => {
-    if (e) e.preventDefault(); // Fixes the preventDefault error
+    if (e) e.preventDefault();
     if (!socket || !currentTextBox || !textInput.trim()) return;
     const fontSize = Math.max(16, Math.floor(currentTextBox.height));
     if (editingTextBoxId) {
@@ -419,38 +474,158 @@ export default function WhiteboardCanvas() {
       document.removeEventListener("mousedown", handleDocumentMouseDown);
   }, [isTextTool, editingTextBoxId, currentTextBox, creatingTextBox]);
 
+  // Responsive canvas: update size on window resize
+  useEffect(() => {
+    const handleResize = () => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const width = Math.min(window.innerWidth * 0.9, 1200);
+      const height = Math.min(window.innerHeight * 0.8, 800);
+      canvas.width = width;
+      canvas.height = height;
+      redraw(strokes, textBoxes);
+    };
+    window.addEventListener("resize", handleResize);
+    handleResize();
+    return () => window.removeEventListener("resize", handleResize);
+    // eslint-disable-next-line
+  }, [strokes, textBoxes]);
+
   return (
     <div className="whiteboard-canvas-page">
       {userId.current && userId.current.startsWith("guest-") && (
         <div style={{ background: "#ffeeba", padding: 8, textAlign: "center" }}>
-          You are editing as a guest. <a href="/login">Login</a> to save your
-          boards!
+          You are editing as a guest. <a href="/login">Login</a> to save your boards!
         </div>
       )}
-      <Toolbar
-        onBack={() => navigate("/whiteboards", { state: { refresh: true } })}
-        onUndo={handleUndo}
-        onRedo={handleRedo}
-        onClear={handleClear}
-        penColor={penColor}
-        setPenColor={setPenColor}
-        penWidth={penWidth}
-        setPenWidth={setPenWidth}
-        isPen={isPen}
-        setIsPen={setIsPen}
-        isEraser={isEraser}
-        setIsEraser={setIsEraser}
-        isTextTool={isTextTool}
-        setIsTextTool={setIsTextTool}
-        eraserWidth={eraserWidth}
-        setEraserWidth={setEraserWidth}
-        canvasRef={canvasRef}
-      />
-      <div className="canvas-wrapper" style={{ position: "relative" }}>
+      {/* Google Docs style top bar */}
+      <div
+        style={{
+          width: "100%",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          background: "#f7f7f7",
+          borderBottom: "1px solid #ddd",
+          position: "sticky",
+          top: 0,
+          zIndex: 10,
+          padding: "0 24px",
+          minHeight: 64,
+        }}
+      >
+        {/* Editable whiteboard name */}
+        <div style={{ display: "flex", alignItems: "center", minWidth: 220 }}>
+          <input
+            value={whiteboardName}
+            onChange={e => setWhiteboardName(e.target.value)}
+            onBlur={async () => {
+              try {
+                await fetch(`http://localhost:4000/whiteboards/${whiteboardId}`, {
+                  method: "PATCH",
+                  headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${localStorage.getItem("token")}`,
+                  },
+                  body: JSON.stringify({ name: whiteboardName }),
+                });
+              } catch {}
+            }}
+            style={{
+              fontSize: 22,
+              fontWeight: 700,
+              border: "none",
+              background: "transparent",
+              outline: "none",
+              minWidth: 120,
+              maxWidth: 320,
+              color: "#222",
+              padding: "8px 0",
+            }}
+          />
+        </div>
+        {/* Toolbar */}
+        <div style={{ flex: 1, margin: "0 24px", display: "flex", justifyContent: "center" }}>
+          <Toolbar
+            onBack={() => navigate("/whiteboards", { state: { refresh: true } })}
+            onUndo={handleUndo}
+            onRedo={handleRedo}
+            onClear={handleClear}
+            penColor={penColor}
+            setPenColor={setPenColor}
+            penWidth={penWidth}
+            setPenWidth={setPenWidth}
+            isPen={isPen}
+            setIsPen={setIsPen}
+            isEraser={isEraser}
+            setIsEraser={setIsEraser}
+            isTextTool={isTextTool}
+            setIsTextTool={setIsTextTool}
+            eraserWidth={eraserWidth}
+            setEraserWidth={setEraserWidth}
+            canvasRef={canvasRef}
+          />
+        </div>
+        {/* Collaborators avatars */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 80 }}>
+          {collaborators.map((u) => (
+            <div
+              key={u.userId}
+              title={u.username || "Guest"}
+              style={{
+                width: 32,
+                height: 32,
+                borderRadius: "50%",
+                background: getColorForName(u.username || "Guest"),
+                color: "#fff",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontWeight: 700,
+                fontSize: 16,
+                border: "2px solid #fff",
+                boxShadow: "0 1px 4px rgba(0,0,0,0.08)",
+                marginBottom: 2,
+                transition: "transform 0.15s",
+              }}
+            >
+              {(u.username || "G")[0].toUpperCase()}
+            </div>
+          ))}
+        </div>
+        {/* Floating comments button */}
+        <button
+          style={{
+            position: "fixed",
+            top: 90,
+            right: 24,
+            zIndex: 101,
+            background: "#fff",
+            border: "1px solid #ccc",
+            borderRadius: "50%",
+            width: 48,
+            height: 48,
+            fontSize: 24,
+            boxShadow: "0 2px 8px rgba(0,0,0,0.08)",
+            cursor: "pointer",
+          }}
+          onClick={() => setCommentsOpen(true)}
+          title="Show Comments"
+        >
+          💬
+        </button>
+        <CommentsSidebar
+          whiteboardId={whiteboardId}
+          socket={socket}
+          open={commentsOpen}
+          onClose={() => setCommentsOpen(false)}
+          currentUserId={userId.current}
+        />
+      </div>
+      {/* Canvas and overlays */}
+      <div className="canvas-wrapper" style={{ position: "relative", flex: 1 }}>
         <canvas
           ref={canvasRef}
-          width={Math.min(window.innerWidth * 0.9, 1200)}
-          height={Math.min(window.innerHeight * 0.8, 800)}
           className="whiteboard-canvas"
         />
         {/* Text box overlays for selection, editing, and moving */}
@@ -486,14 +661,8 @@ export default function WhiteboardCanvas() {
               if (selectedTextBoxId === box._id && !editingTextBoxId) {
                 setDraggingBoxId(box._id);
                 setDragOffset({
-                  x:
-                    e.clientX -
-                    box.x -
-                    canvasRef.current.getBoundingClientRect().left,
-                  y:
-                    e.clientY -
-                    box.y -
-                    canvasRef.current.getBoundingClientRect().top,
+                  x: e.clientX - box.x - canvasRef.current.getBoundingClientRect().left,
+                  y: e.clientY - box.y - canvasRef.current.getBoundingClientRect().top,
                 });
               }
             }}
@@ -557,32 +726,12 @@ export default function WhiteboardCanvas() {
           />
         )}
       </div>
-      <button
-        style={{
-          position: "fixed",
-          top: 90,
-          right: 24,
-          zIndex: 101,
-          background: "#fff",
-          border: "1px solid #ccc",
-          borderRadius: "50%",
-          width: 48,
-          height: 48,
-          fontSize: 24,
-          boxShadow: "0 2px 8px rgba(0,0,0,0.08)",
-          cursor: "pointer",
-        }}
-        onClick={() => setCommentsOpen(true)}
-        title="Show Comments"
-      >
-        💬
-      </button>
-      <CommentsSidebar
-        whiteboardId={whiteboardId}
+      {/* Chatbox at the bottom */}
+      <ChatBox
         socket={socket}
-        open={commentsOpen}
-        onClose={() => setCommentsOpen(false)}
-        currentUserId={userId.current}
+        userId={user.current.userId}
+        username={user.current.username}
+        whiteboardId={whiteboardId}
       />
     </div>
   );
