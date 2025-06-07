@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { io } from "socket.io-client";
 import Toolbar from "./ToolBar.jsx";
+import CommentsSidebar from "./CommentsSidebar.jsx";
 import "../css/whiteboardcanvas.css";
 
 function getUserIdFromToken(token) {
@@ -41,6 +42,7 @@ export default function WhiteboardCanvas() {
   const [editingTextBoxId, setEditingTextBoxId] = useState(null);
   const [draggingBoxId, setDraggingBoxId] = useState(null);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+  const [commentsOpen, setCommentsOpen] = useState(false);
 
   useEffect(() => {
     if (isPen) {
@@ -143,7 +145,9 @@ export default function WhiteboardCanvas() {
 
     newSocket.on("updateTextBox", (box) => {
       setTextBoxes((prev) =>
-        prev.map((b) => (String(b._id) === String(box._id) ? { ...b, ...box } : b))
+        prev.map((b) =>
+          String(b._id) === String(box._id) ? { ...b, ...box } : b
+        )
       );
     });
 
@@ -291,11 +295,7 @@ export default function WhiteboardCanvas() {
       const x = e.clientX - rect.left - dragOffset.x;
       const y = e.clientY - rect.top - dragOffset.y;
       setTextBoxes((prev) =>
-        prev.map((box) =>
-          box._id === draggingBoxId
-            ? { ...box, x, y }
-            : box
-        )
+        prev.map((box) => (box._id === draggingBoxId ? { ...box, x, y } : box))
       );
     };
     const handleUp = () => {
@@ -420,11 +420,11 @@ export default function WhiteboardCanvas() {
   }, [isTextTool, editingTextBoxId, currentTextBox, creatingTextBox]);
 
   return (
-    
     <div className="whiteboard-canvas-page">
       {userId.current && userId.current.startsWith("guest-") && (
-        <div style={{background: "#ffeeba", padding: 8, textAlign: "center"}}>
-          You are editing as a guest. <a href="/login">Login</a> to save your boards!
+        <div style={{ background: "#ffeeba", padding: 8, textAlign: "center" }}>
+          You are editing as a guest. <a href="/login">Login</a> to save your
+          boards!
         </div>
       )}
       <Toolbar
@@ -444,12 +444,13 @@ export default function WhiteboardCanvas() {
         setIsTextTool={setIsTextTool}
         eraserWidth={eraserWidth}
         setEraserWidth={setEraserWidth}
+        canvasRef={canvasRef}
       />
       <div className="canvas-wrapper" style={{ position: "relative" }}>
         <canvas
           ref={canvasRef}
-          width={800}
-          height={600}
+          width={Math.min(window.innerWidth * 0.9, 1200)}
+          height={Math.min(window.innerHeight * 0.8, 800)}
           className="whiteboard-canvas"
         />
         {/* Text box overlays for selection, editing, and moving */}
@@ -485,8 +486,14 @@ export default function WhiteboardCanvas() {
               if (selectedTextBoxId === box._id && !editingTextBoxId) {
                 setDraggingBoxId(box._id);
                 setDragOffset({
-                  x: e.clientX - box.x - canvasRef.current.getBoundingClientRect().left,
-                  y: e.clientY - box.y - canvasRef.current.getBoundingClientRect().top,
+                  x:
+                    e.clientX -
+                    box.x -
+                    canvasRef.current.getBoundingClientRect().left,
+                  y:
+                    e.clientY -
+                    box.y -
+                    canvasRef.current.getBoundingClientRect().top,
                 });
               }
             }}
@@ -550,6 +557,33 @@ export default function WhiteboardCanvas() {
           />
         )}
       </div>
+      <button
+        style={{
+          position: "fixed",
+          top: 90,
+          right: 24,
+          zIndex: 101,
+          background: "#fff",
+          border: "1px solid #ccc",
+          borderRadius: "50%",
+          width: 48,
+          height: 48,
+          fontSize: 24,
+          boxShadow: "0 2px 8px rgba(0,0,0,0.08)",
+          cursor: "pointer",
+        }}
+        onClick={() => setCommentsOpen(true)}
+        title="Show Comments"
+      >
+        💬
+      </button>
+      <CommentsSidebar
+        whiteboardId={whiteboardId}
+        socket={socket}
+        open={commentsOpen}
+        onClose={() => setCommentsOpen(false)}
+        currentUserId={userId.current}
+      />
     </div>
   );
 }

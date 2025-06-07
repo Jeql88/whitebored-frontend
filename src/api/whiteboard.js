@@ -49,3 +49,33 @@ export async function updateWhiteboard(id, name) {
 
   return res.json();
 }
+
+export async function getComments(whiteboardId) {
+  const token = localStorage.getItem('token');
+  const res = await fetch(`${API_URL}/whiteboards/${whiteboardId}/comments`, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  return res.json();
+}
+
+export async function addComment(whiteboardId, text) {
+  const token = localStorage.getItem('token');
+  const res = await fetch(`${API_URL}/whiteboards/${whiteboardId}/comments`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`
+    },
+    body: JSON.stringify({ text }),
+  });
+  return res.json();
+}
+
+export async function deleteComment(whiteboardId, commentId) {
+  const token = localStorage.getItem('token');
+  const res = await fetch(`${API_URL}/whiteboards/${whiteboardId}/comments/${commentId}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  return res.json();
+}

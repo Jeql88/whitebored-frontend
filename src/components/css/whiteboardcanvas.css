@@ -2,16 +2,20 @@
   display: flex;
   flex-direction: column;
   height: 100vh;
-  background: #fefefe;
+  background: #f3f3f3;
 }
 
 .canvas-wrapper {
-  margin-top: 20px;
-  box-shadow: 0 4px 8px rgba(0,0,0,0.1);
-  background: white;
+  background: #f3f3f3;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 0;
+  min-width: 0;
 }
 
 .whiteboard-canvas {
   border: 1px solid #ccc;
   cursor: crosshair;
+  background: white;
 }

@@ -1,9 +1,15 @@
-import React, { useRef, useState } from "react";
+import React, { useRef, useState, useEffect } from "react";
 import "../css/toolbar.css";
 
 const presetColors = [
-  "#000000", "#FF3B30", "#FF9500", "#FFCC00",
-  "#34C759", "#007AFF", "#5856D6", "#8E8E93",
+  "#000000",
+  "#FF3B30",
+  "#FF9500",
+  "#FFCC00",
+  "#34C759",
+  "#007AFF",
+  "#5856D6",
+  "#8E8E93",
 ];
 
 export default function Toolbar({
@@ -23,9 +29,12 @@ export default function Toolbar({
   setIsTextTool,
   eraserWidth,
   setEraserWidth,
+  whiteboardName,
+  canvasRef,
 }) {
   const hiddenColorInputRef = useRef(null);
   const [copied, setCopied] = useState(false);
+  const [showDropdown, setShowDropdown] = useState(false);
 
   const triggerColorPicker = () => {
     if (hiddenColorInputRef.current) hiddenColorInputRef.current.click();
@@ -43,18 +52,72 @@ export default function Toolbar({
     }
   };
 
+  const downloadAsPNG = (highRes = false) => {
+    const canvas = canvasRef.current;
+    const scale = highRes ? 3 : 1;
+
+    const tempCanvas = document.createElement("canvas");
+    tempCanvas.width = canvas.width * scale;
+    tempCanvas.height = canvas.height * scale;
+    const ctx = tempCanvas.getContext("2d");
+    ctx.scale(scale, scale);
+    ctx.drawImage(canvas, 0, 0);
+
+    const link = document.createElement("a");
+    link.download = `${whiteboardName || "whiteboard"}.png`;
+    link.href = tempCanvas.toDataURL("image/png");
+    link.click();
+  };
+
+  const exportAsPDF = () => {
+    import("jspdf").then((jsPDFModule) => {
+      const jsPDF = jsPDFModule.default;
+      const canvas = canvasRef.current;
+      const imgData = canvas.toDataURL("image/png");
+
+      const pdf = new jsPDF({
+        orientation: "landscape",
+        unit: "pt",
+        format: [canvas.width, canvas.height],
+      });
+
+      pdf.addImage(imgData, "PNG", 0, 0, canvas.width, canvas.height);
+      pdf.save(`${whiteboardName || "whiteboard"}.pdf`);
+    });
+  };
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (!e.target.closest(".download-dropdown")) {
+        setShowDropdown(false);
+      }
+    };
+    document.addEventListener("click", handleClickOutside);
+    return () => document.removeEventListener("click", handleClickOutside);
+  }, []);
+  
   return (
     <div className="toolbar">
       <button className="home-button" onClick={onBack} title="Back to Home">
         <img src="/Home.png" alt="Home" className="home-icon" />
       </button>
-      <button onClick={onUndo} title="Undo" className="icon-button">↺</button>
-      <button onClick={onRedo} title="Redo" className="icon-button">↻</button>
-      <button onClick={onClear} title="Clear" className="icon-button">✕</button>
+      <button onClick={onUndo} title="Undo" className="icon-button">
+        ↺
+      </button>
+      <button onClick={onRedo} title="Redo" className="icon-button">
+        ↻
+      </button>
+      <button onClick={onClear} title="Clear" className="icon-button">
+        ✕
+      </button>
 
       <div className="color-swatch-container">
         <div className="current-color-section">
-          <div className="current-color" style={{ backgroundColor: penColor }} title="Current Color" />
+          <div
+            className="current-color"
+            style={{ backgroundColor: penColor }}
+            title="Current Color"
+          />
           <span className="color-separator">|</span>
         </div>
         {presetColors.map((color) => (
@@ -67,8 +130,16 @@ export default function Toolbar({
           />
         ))}
         <div className="color-picker-wrapper">
-          <button className="color-picker-icon-button" onClick={triggerColorPicker} title="Pick a custom color">
-            <img src="/colorpicker.png" alt="Color Picker" className="color-picker-icon" />
+          <button
+            className="color-picker-icon-button"
+            onClick={triggerColorPicker}
+            title="Pick a custom color"
+          >
+            <img
+              src="/colorpicker.png"
+              alt="Color Picker"
+              className="color-picker-icon"
+            />
           </button>
           <input
             type="color"
@@ -130,8 +201,33 @@ export default function Toolbar({
           T
         </button>
       </div>
+
       <div className="spacer" />
-      <button onClick={handleCopyLink} className="icon-button" title="Copy Shareable Link">🔗</button>
+      <div className="download-dropdown">
+        <button
+          className="icon-button"
+          onClick={() => setShowDropdown((prev) => !prev)}
+          title="Download"
+        >
+          ⬇️
+        </button>
+        {showDropdown && (
+          <div className="dropdown-content">
+            <button onClick={() => downloadAsPNG()}>Download PNG</button>
+            <button onClick={() => downloadAsPNG(true)}>
+              Download High-Res PNG
+            </button>
+            <button onClick={() => exportAsPDF()}>Export as PDF</button>
+          </div>
+        )}
+      </div>
+      <button
+        onClick={handleCopyLink}
+        className="icon-button"
+        title="Copy Shareable Link"
+      >
+        🔗
+      </button>
       {copied && <span className="copied-message">Link copied!</span>}
     </div>
   );
