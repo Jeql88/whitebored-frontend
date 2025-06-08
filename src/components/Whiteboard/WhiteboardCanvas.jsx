@@ -54,14 +54,24 @@ export default function WhiteboardCanvas() {
   const [draggingBoxId, setDraggingBoxId] = useState(null);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
   const [commentsOpen, setCommentsOpen] = useState(false);
+  const [openPanel, setOpenPanel] = useState(null);
+  
 
   function getColorForName(name) {
     // Simple hash to pick a color from a palette
     const colors = [
-      "#2563eb", "#f59e42", "#10b981", "#f43f5e", "#a21caf", "#eab308", "#0ea5e9", "#6366f1"
+      "#2563eb",
+      "#f59e42",
+      "#10b981",
+      "#f43f5e",
+      "#a21caf",
+      "#eab308",
+      "#0ea5e9",
+      "#6366f1",
     ];
     let hash = 0;
-    for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
+    for (let i = 0; i < name.length; i++)
+      hash = name.charCodeAt(i) + ((hash << 5) - hash);
     return colors[Math.abs(hash) % colors.length];
   }
 
@@ -495,13 +505,13 @@ export default function WhiteboardCanvas() {
     <div className="whiteboard-canvas-page">
       {userId.current && userId.current.startsWith("guest-") && (
         <div style={{ background: "#ffeeba", padding: 8, textAlign: "center" }}>
-          You are editing as a guest. <a href="/login">Login</a> to save your boards!
+          You are editing as a guest. <a href="/login">Login</a> to save your
+          boards!
         </div>
       )}
       {/* Google Docs style top bar */}
       <div
         style={{
-          width: "100%",
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
@@ -511,24 +521,26 @@ export default function WhiteboardCanvas() {
           top: 0,
           zIndex: 10,
           padding: "0 24px",
-          minHeight: 64,
         }}
       >
         {/* Editable whiteboard name */}
-        <div style={{ display: "flex", alignItems: "center", minWidth: 220 }}>
+        <div style={{ display: "flex", alignItems: "center", minWidth: 130 }}>
           <input
             value={whiteboardName}
-            onChange={e => setWhiteboardName(e.target.value)}
+            onChange={(e) => setWhiteboardName(e.target.value)}
             onBlur={async () => {
               try {
-                await fetch(`http://localhost:4000/whiteboards/${whiteboardId}`, {
-                  method: "PATCH",
-                  headers: {
-                    "Content-Type": "application/json",
-                    Authorization: `Bearer ${localStorage.getItem("token")}`,
-                  },
-                  body: JSON.stringify({ name: whiteboardName }),
-                });
+                await fetch(
+                  `http://localhost:4000/whiteboards/${whiteboardId}`,
+                  {
+                    method: "PATCH",
+                    headers: {
+                      "Content-Type": "application/json",
+                      Authorization: `Bearer ${localStorage.getItem("token")}`,
+                    },
+                    body: JSON.stringify({ name: whiteboardName }),
+                  }
+                );
               } catch {}
             }}
             style={{
@@ -538,16 +550,25 @@ export default function WhiteboardCanvas() {
               background: "transparent",
               outline: "none",
               minWidth: 120,
-              maxWidth: 320,
+              maxWidth: 120,
               color: "#222",
               padding: "8px 0",
             }}
           />
         </div>
         {/* Toolbar */}
-        <div style={{ flex: 1, margin: "0 24px", display: "flex", justifyContent: "center" }}>
+        <div
+          style={{
+            flex: 1,
+            margin: "0 24px",
+            display: "flex",
+            justifyContent: "center",
+          }}
+        >
           <Toolbar
-            onBack={() => navigate("/whiteboards", { state: { refresh: true } })}
+            onBack={() =>
+              navigate("/whiteboards", { state: { refresh: true } })
+            }
             onUndo={handleUndo}
             onRedo={handleRedo}
             onClear={handleClear}
@@ -564,10 +585,21 @@ export default function WhiteboardCanvas() {
             eraserWidth={eraserWidth}
             setEraserWidth={setEraserWidth}
             canvasRef={canvasRef}
+            onCommentsClick={() => setOpenPanel("comments")}
+            commentsOpen={openPanel === "comments"}
+            onChatClick={() => setOpenPanel("chat")}
+            chatOpen={openPanel === "chat"}
           />
         </div>
         {/* Collaborators avatars */}
-        <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 80 }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            minWidth: 80,
+          }}
+        >
           {collaborators.map((u) => (
             <div
               key={u.userId}
@@ -593,41 +625,19 @@ export default function WhiteboardCanvas() {
             </div>
           ))}
         </div>
-        {/* Floating comments button */}
-        <button
-          style={{
-            position: "fixed",
-            top: 90,
-            right: 24,
-            zIndex: 101,
-            background: "#fff",
-            border: "1px solid #ccc",
-            borderRadius: "50%",
-            width: 48,
-            height: 48,
-            fontSize: 24,
-            boxShadow: "0 2px 8px rgba(0,0,0,0.08)",
-            cursor: "pointer",
-          }}
-          onClick={() => setCommentsOpen(true)}
-          title="Show Comments"
-        >
-          💬
-        </button>
+        {openPanel === "comments" && (
         <CommentsSidebar
           whiteboardId={whiteboardId}
           socket={socket}
-          open={commentsOpen}
-          onClose={() => setCommentsOpen(false)}
+          open={true}
+          onClose={() => setOpenPanel(null)}
           currentUserId={userId.current}
         />
+      )}
       </div>
       {/* Canvas and overlays */}
-      <div className="canvas-wrapper" style={{ position: "relative", flex: 1 }}>
-        <canvas
-          ref={canvasRef}
-          className="whiteboard-canvas"
-        />
+      <div className="canvas-wrapper" style={{ position: "relative" }}>
+        <canvas ref={canvasRef} className="whiteboard-canvas" />
         {/* Text box overlays for selection, editing, and moving */}
         {textBoxes.map((box) => (
           <div
@@ -661,8 +671,14 @@ export default function WhiteboardCanvas() {
               if (selectedTextBoxId === box._id && !editingTextBoxId) {
                 setDraggingBoxId(box._id);
                 setDragOffset({
-                  x: e.clientX - box.x - canvasRef.current.getBoundingClientRect().left,
-                  y: e.clientY - box.y - canvasRef.current.getBoundingClientRect().top,
+                  x:
+                    e.clientX -
+                    box.x -
+                    canvasRef.current.getBoundingClientRect().left,
+                  y:
+                    e.clientY -
+                    box.y -
+                    canvasRef.current.getBoundingClientRect().top,
                 });
               }
             }}
@@ -727,12 +743,25 @@ export default function WhiteboardCanvas() {
         )}
       </div>
       {/* Chatbox at the bottom */}
-      <ChatBox
-        socket={socket}
-        userId={user.current.userId}
-        username={user.current.username}
-        whiteboardId={whiteboardId}
-      />
+      {openPanel === "chat" && (
+        <ChatBox
+          socket={socket}
+          userId={user.current.userId}
+          username={user.current.username}
+          whiteboardId={whiteboardId}
+          onClose={() => setOpenPanel(null)}
+        />
+      )}
+      {/* Floating chat button (only if neither is open) */}
+      {openPanel === null && (
+        <button
+          className="chatbox-fab"
+          onClick={() => setOpenPanel("chat")}
+          title="Open Chat"
+        >
+          <img src="/chat.png" alt="Chat" style={{ width: 24, height: 24 }} />
+        </button>
+      )}
     </div>
   );
 }

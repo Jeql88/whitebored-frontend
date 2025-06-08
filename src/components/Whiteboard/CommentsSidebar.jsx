@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useRef } from "react";
 import { getComments, addComment, deleteComment } from "../../api/whiteboard";
+import "../css/commentssidebar.css";
 
 export default function CommentsSidebar({ whiteboardId, socket, open, onClose, currentUserId }) {
   const [comments, setComments] = useState([]);
@@ -39,44 +40,24 @@ export default function CommentsSidebar({ whiteboardId, socket, open, onClose, c
   return (
     <div
       ref={sidebarRef}
-      className="comments-sidebar"
-      style={{
-        position: "fixed",
-        top: 0,
-        right: open ? 0 : -350,
-        width: 350,
-        height: "100vh",
-        background: "#fff",
-        boxShadow: "-2px 0 8px rgba(0,0,0,0.08)",
-        zIndex: 100,
-        transition: "right 0.3s",
-        display: "flex",
-        flexDirection: "column",
-      }}
+      className={`comments-sidebar${open ? "" : " closed"}`}
     >
-      <div style={{ padding: 16, borderBottom: "1px solid #eee", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <b>Comments</b>
-        <button onClick={onClose} style={{ fontSize: 20, background: "none", border: "none", cursor: "pointer" }}>×</button>
+      <div className="comments-header">
+        <span className="comments-title">Comments</span>
+        <button className="comments-close-btn" onClick={onClose} title="Close">×</button>
       </div>
-      <div style={{ flex: 1, overflowY: "auto", padding: 16 }}>
-        {comments.length === 0 && <div style={{ color: "#888" }}>No comments yet.</div>}
+      <div className="comments-list">
+        {comments.length === 0 && <div className="comments-empty">No comments yet.</div>}
         {comments.map((c) => (
-          <div key={c._id} style={{ marginBottom: 18, borderBottom: "1px solid #f0f0f0", paddingBottom: 8 }}>
-            <div style={{ fontWeight: 600, fontSize: 14 }}>{c.userName || "Anonymous"}</div>
-            <div style={{ fontSize: 15, margin: "4px 0" }}>{c.text}</div>
-            <div style={{ fontSize: 12, color: "#aaa" }}>{new Date(c.createdAt).toLocaleString()}</div>
+          <div key={c._id} className="comment-item">
+            <div className="comment-author">{c.userName || "Anonymous"}</div>
+            <div className="comment-text">{c.text}</div>
+            <div className="comment-meta">{new Date(c.createdAt).toLocaleString()}</div>
             {c.userId === currentUserId && (
               <button
+                className="comment-delete-btn"
                 onClick={() => handleDelete(c._id)}
-                style={{
-                  background: "none",
-                  border: "none",
-                  color: "#e74c3c",
-                  cursor: "pointer",
-                  fontSize: 13,
-                  marginTop: 2,
-                  padding: 0,
-                }}
+                title="Delete"
               >
                 Delete
               </button>
@@ -84,14 +65,14 @@ export default function CommentsSidebar({ whiteboardId, socket, open, onClose, c
           </div>
         ))}
       </div>
-      <form onSubmit={handleAdd} style={{ padding: 16, borderTop: "1px solid #eee", display: "flex", gap: 8 }}>
+      <form className="comments-form" onSubmit={handleAdd}>
         <input
+          className="comments-input"
           value={input}
           onChange={(e) => setInput(e.target.value)}
           placeholder="Add a comment..."
-          style={{ flex: 1, padding: 8, borderRadius: 6, border: "1px solid #ccc" }}
         />
-        <button type="submit" style={{ padding: "8px 16px", borderRadius: 6, background: "#007aff", color: "#fff", border: "none", fontWeight: 600 }}>
+        <button className="comments-add-btn" type="submit">
           Add
         </button>
       </form>

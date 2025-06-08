@@ -2,10 +2,9 @@ import React, { useEffect, useRef, useState } from "react";
 import PropTypes from "prop-types";
 import "./Chatbox.css";
 
-export default function ChatBox({ socket, userId, whiteboardId, username }) {
+export default function ChatBox({ socket, userId, whiteboardId, username, onClose }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
-  const [open, setOpen] = useState(true);
   const [dragging, setDragging] = useState(false);
   const [position, setPosition] = useState({ x: null, y: 200 });
   const [offset, setOffset] = useState({ x: 0, y: 0 });
@@ -24,10 +23,10 @@ export default function ChatBox({ socket, userId, whiteboardId, username }) {
   }, [socket, whiteboardId]);
 
   useEffect(() => {
-    if (open && messagesEndRef.current) {
+    if (messagesEndRef.current) {
       messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
     }
-  }, [messages, open]);
+  }, [messages]);
 
   // Drag handlers
   useEffect(() => {
@@ -72,18 +71,6 @@ export default function ChatBox({ socket, userId, whiteboardId, username }) {
     setInput("");
   };
 
-  if (!open) {
-    return (
-      <button
-        className="chatbox-fab"
-        onClick={() => setOpen(true)}
-        title="Open Chat"
-      >
-        💬
-      </button>
-    );
-  }
-
   return (
     <div
       className="chatbox-container"
@@ -107,7 +94,7 @@ export default function ChatBox({ socket, userId, whiteboardId, username }) {
         style={{ cursor: "move", userSelect: "none" }}
       >
         <span className="chatbox-title">Chat</span>
-        <button className="chatbox-close" onClick={() => setOpen(false)} title="Close Chat">
+        <button className="chatbox-close" onClick={onClose} title="Close Chat">
           ×
         </button>
       </div>

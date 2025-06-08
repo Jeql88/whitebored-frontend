@@ -31,6 +31,8 @@ export default function Toolbar({
   setEraserWidth,
   whiteboardName,
   canvasRef,
+  onCommentsClick,
+  commentsOpen,
 }) {
   const hiddenColorInputRef = useRef(null);
   const [copied, setCopied] = useState(false);
@@ -228,6 +230,18 @@ export default function Toolbar({
       >
         🔗
       </button>
+      {!commentsOpen && (
+        <button
+          className="icon-button"
+          onClick={onCommentsClick}
+          title="Show Comments"
+        >
+          {/* FontAwesome or SVG comments icon */}
+          <svg width="24" height="24" fill="none" stroke="#007aff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+          </svg>
+        </button>
+      )}
       {copied && <span className="copied-message">Link copied!</span>}
     </div>
   );

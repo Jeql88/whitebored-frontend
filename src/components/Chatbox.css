@@ -3,7 +3,7 @@
   right: 2rem;
   bottom: 0.75rem;
   z-index: 1000;
-  background: #2563eb;
+  background: #fff;
   color: #fff;
   border: none;
   border-radius: 50%;
@@ -15,9 +15,9 @@
   transition: background 0.2s;
   font-family: 'Segoe UI', Arial, sans-serif;
 }
-.chatbox-fab:hover {
+/* .chatbox-fab:hover {
   background: #1d4ed8;
-}
+} */
 
 .chatbox-container {
   position: fixed;
