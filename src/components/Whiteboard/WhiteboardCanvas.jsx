@@ -249,6 +249,8 @@ export default function WhiteboardCanvas() {
       setStrokes([]);
       setTextBoxes([]);
       setRedoStack([]);
+      setImages([]); // <-- Add this
+      setBackgroundColor("#ffffff"); // <-- Add this (or your default)
     });
 
     // --- IMAGE EVENTS ---
@@ -438,6 +440,8 @@ export default function WhiteboardCanvas() {
     setRedoStack([]);
     setStrokes([]);
     setTextBoxes([]);
+    setImages([]); // <-- Add this
+    setBackgroundColor("#ffffff"); // <-- Add this (or your default)
     const ctx = canvasRef.current.getContext("2d");
     ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
     socket.emit("clearBoard", { whiteboardId });
