@@ -40,8 +40,8 @@ export default function WhiteboardHome() {
 
   useEffect(() => {
     getWhiteboards().then((data) => {
-      setWhiteboards(data);
-      setFilteredBoards(data);
+      setWhiteboards(Array.isArray(data) ? data : []);
+      setFilteredBoards(Array.isArray(data) ? data : []);
     });
   }, []);
 
@@ -64,8 +64,8 @@ export default function WhiteboardHome() {
   useEffect(() => {
     if (location.state?.refresh) {
       getWhiteboards().then((data) => {
-        setWhiteboards(data);
-        setFilteredBoards(data);
+        setWhiteboards(Array.isArray(data) ? data : []);
+        setFilteredBoards(Array.isArray(data) ? data : []);
       });
       window.history.replaceState({}, document.title);
     }
@@ -88,8 +88,12 @@ export default function WhiteboardHome() {
   );
 
   // Sliced arrays for display
-  const ownedToShow = showAllOwned ? ownedBoards : ownedBoards.slice(0, DISPLAY_LIMIT);
-  const sharedToShow = showAllShared ? sharedBoards : sharedBoards.slice(0, DISPLAY_LIMIT);
+  const ownedToShow = showAllOwned
+    ? ownedBoards
+    : ownedBoards.slice(0, DISPLAY_LIMIT);
+  const sharedToShow = showAllShared
+    ? sharedBoards
+    : sharedBoards.slice(0, DISPLAY_LIMIT);
 
   const handleDelete = (id) => {
     setWhiteboards((prev) => prev.filter((wb) => wb._id !== id));
@@ -177,7 +181,9 @@ export default function WhiteboardHome() {
 
       {/* Your Whiteboards Section */}
       <section style={{ width: "100%", maxWidth: 960, marginBottom: 32 }}>
-        <h3 style={{ margin: "24px 0 12px 0", color: "#007bff" }}>Your Whiteboards</h3>
+        <h3 style={{ margin: "24px 0 12px 0", color: "#007bff" }}>
+          Your Whiteboards
+        </h3>
         <div className="whiteboard-grid">
           <div
             className="whiteboard-card create-card"
@@ -189,7 +195,14 @@ export default function WhiteboardHome() {
             <div className="whiteboard-name">Create New</div>
           </div>
           {ownedBoards.length === 0 && (
-            <div style={{ gridColumn: "1/-1", color: "#888", textAlign: "center", marginTop: 24 }}>
+            <div
+              style={{
+                gridColumn: "1/-1",
+                color: "#888",
+                textAlign: "center",
+                marginTop: 24,
+              }}
+            >
               No whiteboards yet. Create one!
             </div>
           )}
@@ -224,10 +237,19 @@ export default function WhiteboardHome() {
 
       {/* Shared With You Section */}
       <section style={{ width: "100%", maxWidth: 960 }}>
-        <h3 style={{ margin: "24px 0 12px 0", color: "#ff6600" }}>Whiteboards Shared With You</h3>
+        <h3 style={{ margin: "24px 0 12px 0", color: "#ff6600" }}>
+          Whiteboards Shared With You
+        </h3>
         <div className="whiteboard-grid">
           {sharedBoards.length === 0 && (
-            <div style={{ gridColumn: "1/-1", color: "#888", textAlign: "center", marginTop: 24 }}>
+            <div
+              style={{
+                gridColumn: "1/-1",
+                color: "#888",
+                textAlign: "center",
+                marginTop: 24,
+              }}
+            >
               No shared whiteboards yet.
             </div>
           )}

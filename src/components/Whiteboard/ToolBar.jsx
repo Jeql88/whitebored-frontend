@@ -33,6 +33,11 @@ export default function Toolbar({
   canvasRef,
   onCommentsClick,
   commentsOpen,
+  onImageUpload,
+  isFillTool,
+  setIsFillTool,
+  fillColor,
+  setFillColor,
 }) {
   const hiddenColorInputRef = useRef(null);
   const [copied, setCopied] = useState(false);
@@ -97,7 +102,7 @@ export default function Toolbar({
     document.addEventListener("click", handleClickOutside);
     return () => document.removeEventListener("click", handleClickOutside);
   }, []);
-  
+
   return (
     <div className="toolbar">
       <button className="home-button" onClick={onBack} title="Back to Home">
@@ -202,6 +207,61 @@ export default function Toolbar({
         >
           T
         </button>
+        <button
+          className={`icon-button ${isFillTool ? "selected" : ""}`}
+          onClick={() => {
+            setIsFillTool((v) => !v);
+            setIsPen(false);
+            setIsEraser(false);
+            setIsTextTool(false);
+          }}
+          title="Fill Page"
+        >
+          <svg
+            width="22"
+            height="22"
+            fill="none"
+            stroke="#007aff"
+            strokeWidth="2"
+            viewBox="0 0 24 24"
+          >
+            <rect x="4" y="4" width="16" height="16" rx="2" />
+            <path d="M8 8l8 8M8 16l8-8" />
+          </svg>
+        </button>
+        {isFillTool && (
+          <input
+            type="color"
+            value={fillColor}
+            onChange={(e) => setFillColor(e.target.value)}
+            style={{ marginLeft: 8, verticalAlign: "middle" }}
+            title="Pick Fill Color"
+          />
+        )}
+        <input
+          type="file"
+          accept="image/png, image/jpeg, image/jpg, image/webp, image/gif"
+          id="image-upload"
+          style={{ display: "none" }}
+          onChange={onImageUpload}
+        />
+        <button
+          className="icon-button"
+          title="Upload Image"
+          onClick={() => document.getElementById("image-upload").click()}
+        >
+          <svg
+            width="22"
+            height="22"
+            fill="none"
+            stroke="#007aff"
+            strokeWidth="2"
+            viewBox="0 0 24 24"
+          >
+            <rect x="3" y="3" width="18" height="18" rx="2" />
+            <path d="M8 17l4-4 4 4M12 13V7" />
+          </svg>
+        </button>
       </div>
 
       <div className="spacer" />
@@ -237,8 +297,17 @@ export default function Toolbar({
           title="Show Comments"
         >
           {/* FontAwesome or SVG comments icon */}
-          <svg width="24" height="24" fill="none" stroke="#007aff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
-            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+          <svg
+            width="24"
+            height="24"
+            fill="none"
+            stroke="#007aff"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            viewBox="0 0 24 24"
+          >
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
           </svg>
         </button>
       )}

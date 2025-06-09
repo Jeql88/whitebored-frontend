@@ -53,12 +53,20 @@ export default function WhiteboardCanvas() {
   const [editingTextBoxId, setEditingTextBoxId] = useState(null);
   const [draggingBoxId, setDraggingBoxId] = useState(null);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
-  const [commentsOpen, setCommentsOpen] = useState(false);
   const [openPanel, setOpenPanel] = useState(null);
-  
+
+  // --- Images ---
+  const [images, setImages] = useState([]);
+  const [selectedImageId, setSelectedImageId] = useState(null);
+  const [draggingImageId, setDraggingImageId] = useState(null);
+  const [resizingImageId, setResizingImageId] = useState(null);
+  const [dragOffsetImage, setDragOffsetImage] = useState({ x: 0, y: 0 });
+
+  const [isFillTool, setIsFillTool] = useState(false);
+  const [fillColor, setFillColor] = useState("#ffffff");
+  const [backgroundColor, setBackgroundColor] = useState("#ffffff");
 
   function getColorForName(name) {
-    // Simple hash to pick a color from a palette
     const colors = [
       "#2563eb",
       "#f59e42",
@@ -119,7 +127,13 @@ export default function WhiteboardCanvas() {
   const redraw = (allStrokes, allTextBoxes) => {
     const canvas = canvasRef.current;
     const context = canvas.getContext("2d");
-    context.clearRect(0, 0, canvas.width, canvas.height);
+    // Fill background first
+    context.save();
+    context.globalCompositeOperation = "source-over";
+    context.fillStyle = backgroundColor;
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.restore();
+
     for (const stroke of allStrokes) {
       if (!stroke.points || stroke.points.length < 2) continue;
       context.beginPath();
@@ -237,6 +251,22 @@ export default function WhiteboardCanvas() {
       setRedoStack([]);
     });
 
+    // --- IMAGE EVENTS ---
+    newSocket.on("addImage", (img) => {
+      setImages((prev) => [...prev, img]);
+    });
+    newSocket.on("updateImage", (img) => {
+      setImages((prev) =>
+        prev.map((i) =>
+          String(i._id) === String(img._id) ? { ...i, ...img } : i
+        )
+      );
+    });
+    newSocket.on("removeImage", ({ _id }) => {
+      setImages((prev) => prev.filter((i) => String(i._id) !== String(_id)));
+      setSelectedImageId((id) => (id === _id ? null : id));
+    });
+
     return () => {
       newSocket.disconnect();
     };
@@ -245,7 +275,7 @@ export default function WhiteboardCanvas() {
   // Redraw on state change
   useEffect(() => {
     redraw(strokes, textBoxes);
-  }, [strokes, textBoxes]);
+  }, [strokes, textBoxes, backgroundColor]);
 
   // Mouse handlers for drawing and text box creation
   useEffect(() => {
@@ -501,6 +531,153 @@ export default function WhiteboardCanvas() {
     // eslint-disable-next-line
   }, [strokes, textBoxes]);
 
+  // --- IMAGE HANDLING ---
+
+  const handleImageUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const img = new window.Image();
+      img.onload = () => {
+        const aspect = img.width / img.height;
+        const maxWidth = 300;
+        const width = Math.min(img.width, maxWidth);
+        const height = width / aspect;
+        // Send to backend
+        socket.emit("addImage", {
+          src: ev.target.result,
+          x: 100,
+          y: 100,
+          width,
+          height,
+          whiteboardId,
+        });
+      };
+      img.src = ev.target.result;
+    };
+    reader.readAsDataURL(file);
+    e.target.value = "";
+  };
+
+  // Drag image
+  useEffect(() => {
+    if (!draggingImageId) return;
+    const handleMove = (e) => {
+      setImages((prev) =>
+        prev.map((img) =>
+          img._id === draggingImageId
+            ? {
+                ...img,
+                x: e.clientX - dragOffsetImage.x,
+                y: e.clientY - dragOffsetImage.y,
+              }
+            : img
+        )
+      );
+    };
+    const handleUp = () => {
+      const img = images.find((i) => i._id === draggingImageId);
+      if (img && socket) {
+        socket.emit("updateImage", {
+          _id: img._id,
+          x: img.x,
+          y: img.y,
+          width: img.width,
+          height: img.height,
+          whiteboardId,
+        });
+      }
+      setDraggingImageId(null);
+    };
+    window.addEventListener("mousemove", handleMove);
+    window.addEventListener("mouseup", handleUp);
+    return () => {
+      window.removeEventListener("mousemove", handleMove);
+      window.removeEventListener("mouseup", handleUp);
+    };
+  }, [draggingImageId, dragOffsetImage, images, socket, whiteboardId]);
+
+  // Resize image
+  useEffect(() => {
+    if (!resizingImageId) return;
+    const handleMove = (e) => {
+      setImages((prev) =>
+        prev.map((img) => {
+          if (img._id !== resizingImageId) return img;
+          const dx = e.movementX;
+          const dy = e.movementY;
+          let newWidth = img.width + dx;
+          let newHeight = img.height + dy;
+          // Keep aspect ratio
+          const aspect = img.width / img.height;
+          if (Math.abs(dx) > Math.abs(dy)) {
+            newHeight = newWidth / aspect;
+          } else {
+            newWidth = newHeight * aspect;
+          }
+          return {
+            ...img,
+            width: Math.max(30, newWidth),
+            height: Math.max(30, newHeight),
+          };
+        })
+      );
+    };
+    const handleUp = () => {
+      const img = images.find((i) => i._id === resizingImageId);
+      if (img && socket) {
+        socket.emit("updateImage", {
+          _id: img._id,
+          x: img.x,
+          y: img.y,
+          width: img.width,
+          height: img.height,
+          whiteboardId,
+        });
+      }
+      setResizingImageId(null);
+    };
+    window.addEventListener("mousemove", handleMove);
+    window.addEventListener("mouseup", handleUp);
+    return () => {
+      window.removeEventListener("mousemove", handleMove);
+      window.removeEventListener("mouseup", handleUp);
+    };
+  }, [resizingImageId, images, socket, whiteboardId]);
+
+  // Delete image with keyboard
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (
+        selectedImageId &&
+        (e.key === "Delete" || e.key === "Backspace") &&
+        socket
+      ) {
+        socket.emit("removeImage", { _id: selectedImageId, whiteboardId });
+        setSelectedImageId(null);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [selectedImageId, socket, whiteboardId]);
+
+  const handleCanvasMouseDown = (e) => {
+    if (isFillTool && e.button === 0) {
+      if (socket) {
+        socket.emit("setBackgroundColor", { color: fillColor, whiteboardId });
+      }
+      setIsFillTool(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!socket) return;
+    const handleSetBackgroundColor = ({ color }) => setBackgroundColor(color);
+    socket.on("setBackgroundColor", handleSetBackgroundColor);
+    return () => socket.off("setBackgroundColor", handleSetBackgroundColor);
+  }, [socket]);
+
   return (
     <div className="whiteboard-canvas-page">
       {userId.current && userId.current.startsWith("guest-") && (
@@ -509,7 +686,7 @@ export default function WhiteboardCanvas() {
           boards!
         </div>
       )}
-      {/* Google Docs style top bar */}
+      {/* Top bar with toolbar */}
       <div
         style={{
           display: "flex",
@@ -589,6 +766,11 @@ export default function WhiteboardCanvas() {
             commentsOpen={openPanel === "comments"}
             onChatClick={() => setOpenPanel("chat")}
             chatOpen={openPanel === "chat"}
+            onImageUpload={handleImageUpload}
+            isFillTool={isFillTool}
+            setIsFillTool={setIsFillTool}
+            fillColor={fillColor}
+            setFillColor={setFillColor}
           />
         </div>
         {/* Collaborators avatars */}
@@ -626,18 +808,30 @@ export default function WhiteboardCanvas() {
           ))}
         </div>
         {openPanel === "comments" && (
-        <CommentsSidebar
-          whiteboardId={whiteboardId}
-          socket={socket}
-          open={true}
-          onClose={() => setOpenPanel(null)}
-          currentUserId={userId.current}
-        />
-      )}
+          <CommentsSidebar
+            whiteboardId={whiteboardId}
+            socket={socket}
+            open={true}
+            onClose={() => setOpenPanel(null)}
+            currentUserId={userId.current}
+          />
+        )}
       </div>
       {/* Canvas and overlays */}
-      <div className="canvas-wrapper" style={{ position: "relative" }}>
-        <canvas ref={canvasRef} className="whiteboard-canvas" />
+      <div
+        className="canvas-wrapper"
+        style={{ position: "relative" }}
+        onClick={() => {
+          setSelectedImageId(null);
+          setEditingTextBoxId(null);
+          setSelectedTextBoxId(null);
+        }}
+      >
+        <canvas
+          ref={canvasRef}
+          className="whiteboard-canvas"
+          onMouseDown={handleCanvasMouseDown}
+        />
         {/* Text box overlays for selection, editing, and moving */}
         {textBoxes.map((box) => (
           <div
@@ -741,6 +935,96 @@ export default function WhiteboardCanvas() {
             }}
           />
         )}
+
+        {images.map((img) => (
+          <div
+            key={img._id}
+            style={{
+              position: "absolute",
+              left: img.x,
+              top: img.y,
+              width: img.width,
+              height: img.height,
+              border:
+                selectedImageId === img._id
+                  ? "2px solid #007aff"
+                  : "1px solid #ccc",
+              zIndex: 20,
+              cursor: draggingImageId === img._id ? "grabbing" : "move",
+              userSelect: "none",
+            }}
+            onClick={(e) => {
+              e.stopPropagation();
+              setSelectedImageId(img._id);
+            }}
+            onMouseDown={(e) => {
+              // Only start dragging if already selected
+              if (selectedImageId === img._id) {
+                e.stopPropagation();
+                setDraggingImageId(img._id);
+                setDragOffsetImage({
+                  x: e.clientX - img.x,
+                  y: e.clientY - img.y,
+                });
+              }
+            }}
+          >
+            <img
+              src={img.src}
+              alt=""
+              draggable={false}
+              style={{ width: "100%", height: "100%", pointerEvents: "none" }}
+            />
+            {/* Resize handle (bottom right corner) */}
+            {selectedImageId === img._id && (
+              <div
+                style={{
+                  position: "absolute",
+                  right: -8,
+                  bottom: -8,
+                  width: 16,
+                  height: 16,
+                  background: "#fff",
+                  border: "2px solid #007aff",
+                  borderRadius: "50%",
+                  cursor: "nwse-resize",
+                  zIndex: 21,
+                }}
+                onMouseDown={(e) => {
+                  e.stopPropagation();
+                  setResizingImageId(img._id);
+                }}
+              />
+            )}
+            {/* Delete button (top right) */}
+            {selectedImageId === img._id && (
+              <button
+                style={{
+                  position: "absolute",
+                  top: -10,
+                  right: -10,
+                  background: "#fff",
+                  border: "1px solid #e74c3c",
+                  color: "#e74c3c",
+                  borderRadius: "50%",
+                  width: 20,
+                  height: 20,
+                  fontSize: 14,
+                  cursor: "pointer",
+                  zIndex: 22,
+                }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  socket.emit("removeImage", { _id: img._id, whiteboardId });
+                  setSelectedImageId(null);
+                }}
+                title="Delete Image"
+              >
+                ×
+              </button>
+            )}
+          </div>
+        ))}
       </div>
       {/* Chatbox at the bottom */}
       {openPanel === "chat" && (
