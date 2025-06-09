@@ -29,15 +29,18 @@ export default function Toolbar({
   setIsTextTool,
   eraserWidth,
   setEraserWidth,
-  whiteboardName,
   canvasRef,
   onCommentsClick,
   commentsOpen,
+  onChatClick,
+  chatOpen,
   onImageUpload,
   isFillTool,
   setIsFillTool,
   fillColor,
   setFillColor,
+  isMoveTool,
+  setIsMoveTool,
 }) {
   const hiddenColorInputRef = useRef(null);
   const [copied, setCopied] = useState(false);
@@ -71,7 +74,7 @@ export default function Toolbar({
     ctx.drawImage(canvas, 0, 0);
 
     const link = document.createElement("a");
-    link.download = `${whiteboardName || "whiteboard"}.png`;
+    link.download = `whiteboard.png`;
     link.href = tempCanvas.toDataURL("image/png");
     link.click();
   };
@@ -87,9 +90,8 @@ export default function Toolbar({
         unit: "pt",
         format: [canvas.width, canvas.height],
       });
-
       pdf.addImage(imgData, "PNG", 0, 0, canvas.width, canvas.height);
-      pdf.save(`${whiteboardName || "whiteboard"}.pdf`);
+      pdf.save(`whiteboard.pdf`);
     });
   };
 
@@ -102,6 +104,32 @@ export default function Toolbar({
     document.addEventListener("click", handleClickOutside);
     return () => document.removeEventListener("click", handleClickOutside);
   }, []);
+
+  // Tool selection logic: clicking a tool disables move tool, clicking move disables others
+  const handlePenClick = () => {
+    setIsPen(true);
+    setIsEraser(false);
+    setIsTextTool(false);
+    setIsMoveTool(false);
+  };
+  const handleEraserClick = () => {
+    setIsEraser((v) => !v);
+    setIsPen(false);
+    setIsTextTool(false);
+    setIsMoveTool(false);
+  };
+  const handleTextClick = () => {
+    setIsTextTool((v) => !v);
+    setIsPen(false);
+    setIsEraser(false);
+    setIsMoveTool(false);
+  };
+  const handleMoveClick = () => {
+    setIsMoveTool((v) => !v);
+    setIsPen(false);
+    setIsEraser(false);
+    setIsTextTool(false);
+  };
 
   return (
     <div className="toolbar">
@@ -156,79 +184,78 @@ export default function Toolbar({
             className="hidden-color-picker"
           />
         </div>
-        <label className="toolbar-label">
-          <input
-            type="range"
-            min="1"
-            max="20"
-            value={isEraser ? eraserWidth : penWidth}
-            onChange={(e) =>
-              isEraser
-                ? setEraserWidth(Number(e.target.value))
-                : setPenWidth(Number(e.target.value))
-            }
-            className="thickness-slider"
-            title={isEraser ? "Eraser Thickness" : "Pen Thickness"}
-          />
-          <span className="thickness-value">
-            {isEraser ? eraserWidth : penWidth}px
-          </span>
-        </label>
-        <button
-          className={`icon-button ${isPen ? "selected" : ""}`}
-          onClick={() => {
-            setIsPen(true);
-            setIsEraser(false);
-            setIsTextTool(false);
-          }}
-          title="Pen Tool"
+      </div>
+
+      <label className="toolbar-label">
+        <input
+          type="range"
+          min="1"
+          max="20"
+          value={isEraser ? eraserWidth : penWidth}
+          onChange={(e) =>
+            isEraser
+              ? setEraserWidth(Number(e.target.value))
+              : setPenWidth(Number(e.target.value))
+          }
+          className="thickness-slider"
+          title={isEraser ? "Eraser Thickness" : "Pen Thickness"}
+        />
+        <span className="thickness-value">
+          {isEraser ? eraserWidth : penWidth}px
+        </span>
+      </label>
+      <button
+        className={`icon-button ${isPen ? "selected" : ""}`}
+        onClick={handlePenClick}
+        title="Pen Tool"
+      >
+        ✏️
+      </button>
+      <button
+        className={`icon-button ${isEraser ? "selected" : ""}`}
+        onClick={handleEraserClick}
+        title="Eraser"
+      >
+        🧹
+      </button>
+      <button
+        className={`icon-button ${isTextTool ? "selected" : ""}`}
+        onClick={handleTextClick}
+        title="Text Tool"
+      >
+        T
+      </button>
+      <button
+        className={`icon-button ${isMoveTool ? "selected" : ""}`}
+        onClick={handleMoveClick}
+        title="Move/Drag Canvas"
+      >
+        <span role="img" aria-label="Move">
+          🖐️
+        </span>
+      </button>
+      <button
+        className={`icon-button ${isFillTool ? "selected" : ""}`}
+        onClick={() => {
+          setIsFillTool((v) => !v);
+          setIsPen(false);
+          setIsEraser(false);
+          setIsTextTool(false);
+          setIsMoveTool(false);
+        }}
+        title="Fill Page"
+      >
+        <svg
+          width="22"
+          height="22"
+          fill="none"
+          stroke="#007aff"
+          strokeWidth="2"
+          viewBox="0 0 24 24"
         >
-          ✏️
-        </button>
-        <button
-          className={`icon-button ${isEraser ? "selected" : ""}`}
-          onClick={() => {
-            setIsEraser((v) => !v);
-            setIsPen(false);
-            setIsTextTool(false);
-          }}
-          title="Eraser"
-        >
-          🧹
-        </button>
-        <button
-          className={`icon-button ${isTextTool ? "selected" : ""}`}
-          onClick={() => {
-            setIsTextTool((v) => !v);
-            setIsPen(false);
-            setIsEraser(false);
-          }}
-          title="Text Tool"
-        >
-          T
-        </button>
-        <button
-          className={`icon-button ${isFillTool ? "selected" : ""}`}
-          onClick={() => {
-            setIsFillTool((v) => !v);
-            setIsPen(false);
-            setIsEraser(false);
-            setIsTextTool(false);
-          }}
-          title="Fill Page"
-        >
-          <svg
-            width="22"
-            height="22"
-            fill="none"
-            stroke="#007aff"
-            strokeWidth="2"
-            viewBox="0 0 24 24"
-          >
-            <rect x="4" y="4" width="16" height="16" rx="2" />
-            <path d="M8 8l8 8M8 16l8-8" />
-          </svg>
-        </button>
+          <rect x="4" y="4" width="16" height="16" rx="2" />
+          <path d="M8 8l8 8M8 16l8-8" />
+        </svg>
         {isFillTool && (
           <input
             type="color"
@@ -238,32 +265,49 @@ export default function Toolbar({
             title="Pick Fill Color"
           />
         )}
-        <input
-          type="file"
-          accept="image/png, image/jpeg, image/jpg, image/webp, image/gif"
-          id="image-upload"
-          style={{ display: "none" }}
-          onChange={onImageUpload}
-        />
-        <button
-          className="icon-button"
-          title="Upload Image"
-          onClick={() => document.getElementById("image-upload").click()}
+      </button>
+      <input
+        type="file"
+        accept="image/png, image/jpeg, image/jpg, image/webp, image/gif"
+        id="image-upload"
+        style={{ display: "none" }}
+        onChange={onImageUpload}
+      />
+      <button
+        className="icon-button"
+        title="Upload Image"
+        onClick={() => document.getElementById("image-upload").click()}
+      >
+        <svg
+          width="22"
+          height="22"
+          fill="none"
+          stroke="#007aff"
+          strokeWidth="2"
+          viewBox="0 0 24 24"
         >
-          <svg
-            width="22"
-            height="22"
-            fill="none"
-            stroke="#007aff"
-            strokeWidth="2"
-            viewBox="0 0 24 24"
-          >
-            <rect x="3" y="3" width="18" height="18" rx="2" />
-            <path d="M8 17l4-4 4 4M12 13V7" />
-          </svg>
-        </button>
-      </div>
-
+          <rect x="3" y="3" width="18" height="18" rx="2" />
+          <path d="M8 17l4-4 4 4M12 13V7" />
+        </svg>
+      </button>
+      <button
+        className="icon-button"
+        onClick={onCommentsClick}
+        title="Show Comments"
+      >
+        <svg
+          width="24"
+          height="24"
+          fill="none"
+          stroke="#007aff"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          viewBox="0 0 24 24"
+        >
+          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+        </svg>
+      </button>
       <div className="spacer" />
       <div className="download-dropdown">
         <button
@@ -290,27 +334,6 @@ export default function Toolbar({
       >
         🔗
       </button>
-      {!commentsOpen && (
-        <button
-          className="icon-button"
-          onClick={onCommentsClick}
-          title="Show Comments"
-        >
-          {/* FontAwesome or SVG comments icon */}
-          <svg
-            width="24"
-            height="24"
-            fill="none"
-            stroke="#007aff"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            viewBox="0 0 24 24"
-          >
-            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-          </svg>
-        </button>
-      )}
       {copied && <span className="copied-message">Link copied!</span>}
     </div>
   );

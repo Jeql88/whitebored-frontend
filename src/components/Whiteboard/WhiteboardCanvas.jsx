@@ -5,6 +5,7 @@ import Toolbar from "./ToolBar.jsx";
 import CommentsSidebar from "./CommentsSidebar.jsx";
 import "../css/whiteboardcanvas.css";
 import ChatBox from "../Chatbox";
+import Minimap from "./Minimap.jsx";
 
 function getUserIdFromToken(token) {
   try {
@@ -21,6 +22,11 @@ function getUserFromToken(token) {
     return { userId: null, username: "Guest" };
   }
 }
+
+const INITIAL_CANVAS_WIDTH = 1600;
+const INITIAL_CANVAS_HEIGHT = 1200;
+const EXPAND_MARGIN = 80;
+const EXPAND_STEP = 800;
 
 export default function WhiteboardCanvas() {
   const { id: whiteboardId } = useParams();
@@ -43,11 +49,12 @@ export default function WhiteboardCanvas() {
   const [isEraser, setIsEraser] = useState(false);
   const [eraserWidth, setEraserWidth] = useState(20);
   const [isTextTool, setIsTextTool] = useState(false);
+  const [isMoveTool, setIsMoveTool] = useState(false);
   const [collaborators, setCollaborators] = useState([]);
   // Text box states
   const [creatingTextBox, setCreatingTextBox] = useState(false);
   const [textBoxStart, setTextBoxStart] = useState(null);
-  const [currentTextBox, setCurrentTextBox] = useState(null); // For creating or editing
+  const [currentTextBox, setCurrentTextBox] = useState(null);
   const [textInput, setTextInput] = useState("");
   const [selectedTextBoxId, setSelectedTextBoxId] = useState(null);
   const [editingTextBoxId, setEditingTextBoxId] = useState(null);
@@ -65,6 +72,22 @@ export default function WhiteboardCanvas() {
   const [isFillTool, setIsFillTool] = useState(false);
   const [fillColor, setFillColor] = useState("#ffffff");
   const [backgroundColor, setBackgroundColor] = useState("#ffffff");
+
+  // --- Expandable canvas state ---
+  const [canvasSize, setCanvasSize] = useState({
+    width: INITIAL_CANVAS_WIDTH,
+    height: INITIAL_CANVAS_HEIGHT,
+  });
+  const [viewport, setViewport] = useState({ x: 0, y: 0 });
+  const [isPanning, setIsPanning] = useState(false);
+  const panStart = useRef({ x: 0, y: 0 });
+  const viewportStart = useRef({ x: 0, y: 0 });
+
+  // --- Minimap ---
+  const minimapSize = { width: 200, height: 150 };
+  function handleMinimapMoveViewport({ x, y }) {
+    setViewport({ x, y });
+  }
 
   function getColorForName(name) {
     const colors = [
@@ -105,34 +128,33 @@ export default function WhiteboardCanvas() {
 
   // Tool switching logic
   useEffect(() => {
-    if (isPen) {
+    // If no tool is selected, default to pen
+    if (!isPen && !isEraser && !isTextTool && !isMoveTool) setIsPen(true);
+    // If move tool is selected, disable all others
+    if (isMoveTool) {
+      setIsPen(false);
       setIsEraser(false);
       setIsTextTool(false);
     }
-  }, [isPen]);
-  useEffect(() => {
-    if (isEraser) {
-      setIsPen(false);
-      setIsTextTool(false);
-    }
-  }, [isEraser]);
-  useEffect(() => {
-    if (isTextTool) {
-      setIsPen(false);
-      setIsEraser(false);
-    }
-  }, [isTextTool]);
+    // If any other tool is selected, disable move tool
+    if ((isPen || isEraser || isTextTool) && isMoveTool) setIsMoveTool(false);
+  }, [isPen, isEraser, isTextTool, isMoveTool]);
 
   // Helper to redraw all events
   const redraw = (allStrokes, allTextBoxes) => {
     const canvas = canvasRef.current;
     const context = canvas.getContext("2d");
-    // Fill background first
     context.save();
     context.globalCompositeOperation = "source-over";
+    context.setTransform(1, 0, 0, 1, 0, 0);
+    context.clearRect(0, 0, canvas.width, canvas.height);
     context.fillStyle = backgroundColor;
     context.fillRect(0, 0, canvas.width, canvas.height);
     context.restore();
+
+    // Pan/viewport
+    context.save();
+    context.translate(-viewport.x, -viewport.y);
 
     for (const stroke of allStrokes) {
       if (!stroke.points || stroke.points.length < 2) continue;
@@ -152,6 +174,12 @@ export default function WhiteboardCanvas() {
       context.fillText(box.text, box.x, box.y + (box.fontSize || 20));
       context.restore();
     }
+    for (const img of images) {
+      const imageObj = new window.Image();
+      imageObj.src = img.src;
+      context.drawImage(imageObj, img.x, img.y, img.width, img.height);
+    }
+    context.restore();
   };
 
   // Set user info and connect socket
@@ -192,6 +220,8 @@ export default function WhiteboardCanvas() {
     // Draw a single stroke
     const drawStroke = (stroke) => {
       if (!stroke.points || stroke.points.length < 2) return;
+      context.save();
+      context.translate(-viewport.x, -viewport.y);
       context.beginPath();
       context.moveTo(stroke.points[0].x, stroke.points[0].y);
       for (let i = 1; i < stroke.points.length; i++) {
@@ -200,18 +230,19 @@ export default function WhiteboardCanvas() {
       context.strokeStyle = stroke.color || "black";
       context.lineWidth = stroke.width || 2;
       context.stroke();
+      context.restore();
     };
 
     // Draw a single text box
     const drawTextBox = (box) => {
       context.save();
+      context.translate(-viewport.x, -viewport.y);
       context.font = `${box.fontSize || 20}px Arial`;
       context.fillStyle = box.color || "#222";
       context.fillText(box.text, box.x, box.y + (box.fontSize || 20));
       context.restore();
     };
 
-    // On initial load, backend will replay all events
     newSocket.on("drawStroke", (stroke) => {
       setStrokes((prev) => [...prev, stroke]);
       drawStroke(stroke);
@@ -249,8 +280,8 @@ export default function WhiteboardCanvas() {
       setStrokes([]);
       setTextBoxes([]);
       setRedoStack([]);
-      setImages([]); // <-- Add this
-      setBackgroundColor("#ffffff"); // <-- Add this (or your default)
+      setImages([]);
+      setBackgroundColor("#ffffff");
     });
 
     // --- IMAGE EVENTS ---
@@ -272,14 +303,35 @@ export default function WhiteboardCanvas() {
     return () => {
       newSocket.disconnect();
     };
-  }, [whiteboardId, navigate]);
+  }, [whiteboardId, navigate, viewport.x, viewport.y]);
 
   // Redraw on state change
   useEffect(() => {
     redraw(strokes, textBoxes);
-  }, [strokes, textBoxes, backgroundColor]);
+  }, [strokes, textBoxes, backgroundColor, viewport, canvasSize, images]);
 
-  // Mouse handlers for drawing and text box creation
+  // --- Canvas expansion logic ---
+  function expandCanvasIfNeeded(point) {
+    let { width, height } = canvasSize;
+    let expanded = false;
+    if (point.x > width - EXPAND_MARGIN) {
+      width += EXPAND_STEP;
+      expanded = true;
+    }
+    if (point.y > height - EXPAND_MARGIN) {
+      height += EXPAND_STEP;
+      expanded = true;
+    }
+    if (point.x < EXPAND_MARGIN && viewport.x > 0) {
+      setViewport((v) => ({ ...v, x: Math.max(0, v.x - EXPAND_STEP) }));
+    }
+    if (point.y < EXPAND_MARGIN && viewport.y > 0) {
+      setViewport((v) => ({ ...v, y: Math.max(0, v.y - EXPAND_STEP) }));
+    }
+    if (expanded) setCanvasSize({ width, height });
+  }
+
+  // Mouse handlers for drawing, text, and panning
   useEffect(() => {
     const canvas = canvasRef.current;
     const context = canvas.getContext("2d");
@@ -287,13 +339,23 @@ export default function WhiteboardCanvas() {
     const getMousePos = (e) => {
       const rect = canvas.getBoundingClientRect();
       return {
-        x: e.clientX - rect.left,
-        y: e.clientY - rect.top,
+        x: e.clientX - rect.left + viewport.x,
+        y: e.clientY - rect.top + viewport.y,
       };
     };
 
-    // --- Drawing/Eraser ---
     const handleMouseDown = (e) => {
+      // Pan tool: left mouse if move tool is active
+      if (
+        (isMoveTool || isPanning) &&
+        (e.button === 0 || e.button === 1)
+      ) {
+        setIsPanning(true);
+        panStart.current = { x: e.clientX, y: e.clientY };
+        viewportStart.current = { ...viewport };
+        return;
+      }
+
       if (e.button !== 0) return;
       const pos = getMousePos(e);
 
@@ -315,6 +377,26 @@ export default function WhiteboardCanvas() {
     };
 
     const handleMouseMove = (e) => {
+      if (isPanning) {
+        setViewport((v) => ({
+          x: Math.max(
+            0,
+            Math.min(
+              canvasSize.width - canvas.width,
+              viewportStart.current.x - (e.clientX - panStart.current.x)
+            )
+          ),
+          y: Math.max(
+            0,
+            Math.min(
+              canvasSize.height - canvas.height,
+              viewportStart.current.y - (e.clientY - panStart.current.y)
+            )
+          ),
+        }));
+        return;
+      }
+
       if (isTextTool && creatingTextBox && textBoxStart) {
         const pos = getMousePos(e);
         setCurrentTextBox({
@@ -323,12 +405,15 @@ export default function WhiteboardCanvas() {
           width: Math.abs(pos.x - textBoxStart.x),
           height: Math.abs(pos.y - textBoxStart.y),
         });
+        expandCanvasIfNeeded(pos);
         return;
       }
       if (!drawing.current) return;
       const newPoint = getMousePos(e);
       strokePoints.current.push(newPoint);
 
+      context.save();
+      context.translate(-viewport.x, -viewport.y);
       context.beginPath();
       context.moveTo(
         strokePoints.current[strokePoints.current.length - 2].x,
@@ -338,15 +423,26 @@ export default function WhiteboardCanvas() {
       context.strokeStyle = isEraser ? "#fff" : penColor;
       context.lineWidth = isEraser ? eraserWidth : penWidth;
       context.stroke();
+      context.restore();
+
+      expandCanvasIfNeeded(newPoint);
     };
 
     const handleMouseUp = (e) => {
+      if (isPanning) {
+        setIsPanning(false);
+        return;
+      }
       if (isTextTool && creatingTextBox && currentTextBox) {
         setCreatingTextBox(false);
         setTimeout(() => {
           const input = document.getElementById("canvas-text-input");
           if (input) input.focus();
         }, 0);
+        expandCanvasIfNeeded({
+          x: currentTextBox.x + currentTextBox.width,
+          y: currentTextBox.y + currentTextBox.height,
+        });
         return;
       }
       if (drawing.current && strokePoints.current.length > 1 && socket) {
@@ -381,6 +477,11 @@ export default function WhiteboardCanvas() {
     creatingTextBox,
     currentTextBox,
     textBoxStart,
+    isPanning,
+    viewport,
+    canvasSize,
+    isPen,
+    isMoveTool,
   ]);
 
   // Drag to move text box
@@ -389,11 +490,12 @@ export default function WhiteboardCanvas() {
     const handleMove = (e) => {
       const canvas = canvasRef.current;
       const rect = canvas.getBoundingClientRect();
-      const x = e.clientX - rect.left - dragOffset.x;
-      const y = e.clientY - rect.top - dragOffset.y;
+      const x = e.clientX - rect.left + viewport.x - dragOffset.x;
+      const y = e.clientY - rect.top + viewport.y - dragOffset.y;
       setTextBoxes((prev) =>
         prev.map((box) => (box._id === draggingBoxId ? { ...box, x, y } : box))
       );
+      expandCanvasIfNeeded({ x, y });
     };
     const handleUp = () => {
       const box = textBoxes.find((b) => b._id === draggingBoxId);
@@ -408,12 +510,11 @@ export default function WhiteboardCanvas() {
       window.removeEventListener("mousemove", handleMove);
       window.removeEventListener("mouseup", handleUp);
     };
-  }, [draggingBoxId, dragOffset, socket, textBoxes, whiteboardId]);
+  }, [draggingBoxId, dragOffset, socket, textBoxes, whiteboardId, viewport, canvasSize]);
 
   // Undo: only remove your own last stroke
   const handleUndo = () => {
     if (!socket) return;
-    // Find last stroke by this user
     const lastMyStroke = [...strokes]
       .reverse()
       .find((s) => s.userId === userId.current);
@@ -440,8 +541,8 @@ export default function WhiteboardCanvas() {
     setRedoStack([]);
     setStrokes([]);
     setTextBoxes([]);
-    setImages([]); // <-- Add this
-    setBackgroundColor("#ffffff"); // <-- Add this (or your default)
+    setImages([]);
+    setBackgroundColor("#ffffff");
     const ctx = canvasRef.current.getContext("2d");
     ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
     socket.emit("clearBoard", { whiteboardId });
@@ -453,7 +554,6 @@ export default function WhiteboardCanvas() {
     if (!socket || !currentTextBox || !textInput.trim()) return;
     const fontSize = Math.max(16, Math.floor(currentTextBox.height));
     if (editingTextBoxId) {
-      // Update existing text box
       socket.emit("updateTextBox", {
         _id: editingTextBoxId,
         x: currentTextBox.x,
@@ -467,7 +567,6 @@ export default function WhiteboardCanvas() {
         whiteboardId,
       });
     } else {
-      // Create new text box
       socket.emit("addTextBox", {
         x: currentTextBox.x,
         y: currentTextBox.y,
@@ -523,8 +622,9 @@ export default function WhiteboardCanvas() {
     const handleResize = () => {
       const canvas = canvasRef.current;
       if (!canvas) return;
-      const width = Math.min(window.innerWidth * 0.9, 1200);
-      const height = Math.min(window.innerHeight * 0.8, 800);
+      // Full viewport
+      const width = window.innerWidth;
+      const height = window.innerHeight - 56; // minus toolbar
       canvas.width = width;
       canvas.height = height;
       redraw(strokes, textBoxes);
@@ -532,8 +632,7 @@ export default function WhiteboardCanvas() {
     window.addEventListener("resize", handleResize);
     handleResize();
     return () => window.removeEventListener("resize", handleResize);
-    // eslint-disable-next-line
-  }, [strokes, textBoxes]);
+  }, [strokes, textBoxes, viewport, canvasSize]);
 
   // --- IMAGE HANDLING ---
 
@@ -548,11 +647,10 @@ export default function WhiteboardCanvas() {
         const maxWidth = 300;
         const width = Math.min(img.width, maxWidth);
         const height = width / aspect;
-        // Send to backend
         socket.emit("addImage", {
           src: ev.target.result,
-          x: 100,
-          y: 100,
+          x: 100 + viewport.x,
+          y: 100 + viewport.y,
           width,
           height,
           whiteboardId,
@@ -573,8 +671,8 @@ export default function WhiteboardCanvas() {
           img._id === draggingImageId
             ? {
                 ...img,
-                x: e.clientX - dragOffsetImage.x,
-                y: e.clientY - dragOffsetImage.y,
+                x: e.clientX - dragOffsetImage.x + viewport.x,
+                y: e.clientY - dragOffsetImage.y + viewport.y,
               }
             : img
         )
@@ -600,7 +698,7 @@ export default function WhiteboardCanvas() {
       window.removeEventListener("mousemove", handleMove);
       window.removeEventListener("mouseup", handleUp);
     };
-  }, [draggingImageId, dragOffsetImage, images, socket, whiteboardId]);
+  }, [draggingImageId, dragOffsetImage, images, socket, whiteboardId, viewport]);
 
   // Resize image
   useEffect(() => {
@@ -613,7 +711,6 @@ export default function WhiteboardCanvas() {
           const dy = e.movementY;
           let newWidth = img.width + dx;
           let newHeight = img.height + dy;
-          // Keep aspect ratio
           const aspect = img.width / img.height;
           if (Math.abs(dx) > Math.abs(dy)) {
             newHeight = newWidth / aspect;
@@ -683,11 +780,10 @@ export default function WhiteboardCanvas() {
   }, [socket]);
 
   return (
-    <div className="whiteboard-canvas-page">
+    <div className="whiteboard-canvas-page" style={{ height: "100vh", width: "100vw", padding: 0, margin: 0 }}>
       {userId.current && userId.current.startsWith("guest-") && (
         <div style={{ background: "#ffeeba", padding: 8, textAlign: "center" }}>
-          You are editing as a guest. <a href="/login">Login</a> to save your
-          boards!
+          You are editing as a guest. <a href="/login">Login</a> to save your boards!
         </div>
       )}
       {/* Top bar with toolbar */}
@@ -702,6 +798,7 @@ export default function WhiteboardCanvas() {
           top: 0,
           zIndex: 10,
           padding: "0 24px",
+          height: 56,
         }}
       >
         {/* Editable whiteboard name */}
@@ -775,6 +872,8 @@ export default function WhiteboardCanvas() {
             setIsFillTool={setIsFillTool}
             fillColor={fillColor}
             setFillColor={setFillColor}
+            isMoveTool={isMoveTool}
+            setIsMoveTool={setIsMoveTool}
           />
         </div>
         {/* Collaborators avatars */}
@@ -824,7 +923,15 @@ export default function WhiteboardCanvas() {
       {/* Canvas and overlays */}
       <div
         className="canvas-wrapper"
-        style={{ position: "relative" }}
+        style={{
+          position: "relative",
+          background: "#f3f3f3",
+          width: "100vw",
+          height: "calc(100vh - 56px)",
+          minHeight: 0,
+          minWidth: 0,
+          overflow: "hidden",
+        }}
         onClick={() => {
           setSelectedImageId(null);
           setEditingTextBoxId(null);
@@ -834,6 +941,22 @@ export default function WhiteboardCanvas() {
         <canvas
           ref={canvasRef}
           className="whiteboard-canvas"
+          width={window.innerWidth}
+          height={window.innerHeight - 56}
+          style={{
+            background: "#fff",
+            cursor:
+              isMoveTool || isPanning
+                ? "grab"
+                : isPen
+                ? "crosshair"
+                : isTextTool
+                ? "text"
+                : "default",
+            display: "block",
+            width: "100vw",
+            height: "calc(100vh - 56px)",
+          }}
           onMouseDown={handleCanvasMouseDown}
         />
         {/* Text box overlays for selection, editing, and moving */}
@@ -842,8 +965,8 @@ export default function WhiteboardCanvas() {
             key={box._id}
             style={{
               position: "absolute",
-              left: box.x,
-              top: box.y,
+              left: box.x - viewport.x,
+              top: box.y - viewport.y,
               width: box.width || 120,
               height: box.height || 30,
               border:
@@ -871,11 +994,11 @@ export default function WhiteboardCanvas() {
                 setDragOffset({
                   x:
                     e.clientX -
-                    box.x -
+                    (box.x - viewport.x) -
                     canvasRef.current.getBoundingClientRect().left,
                   y:
                     e.clientY -
-                    box.y -
+                    (box.y - viewport.y) -
                     canvasRef.current.getBoundingClientRect().top,
                 });
               }
@@ -890,8 +1013,8 @@ export default function WhiteboardCanvas() {
             onSubmit={handleTextSubmit}
             style={{
               position: "absolute",
-              left: currentTextBox?.x,
-              top: currentTextBox?.y,
+              left: currentTextBox?.x - viewport.x,
+              top: currentTextBox?.y - viewport.y,
               width: currentTextBox?.width || 120,
               height: currentTextBox?.height || 30,
               background: "rgba(255,255,255,0.8)",
@@ -928,8 +1051,8 @@ export default function WhiteboardCanvas() {
           <div
             style={{
               position: "absolute",
-              left: currentTextBox.x,
-              top: currentTextBox.y,
+              left: currentTextBox.x - viewport.x,
+              top: currentTextBox.y - viewport.y,
               width: currentTextBox.width,
               height: currentTextBox.height,
               border: "1px dashed #888",
@@ -945,8 +1068,8 @@ export default function WhiteboardCanvas() {
             key={img._id}
             style={{
               position: "absolute",
-              left: img.x,
-              top: img.y,
+              left: img.x - viewport.x,
+              top: img.y - viewport.y,
               width: img.width,
               height: img.height,
               border:
@@ -962,13 +1085,12 @@ export default function WhiteboardCanvas() {
               setSelectedImageId(img._id);
             }}
             onMouseDown={(e) => {
-              // Only start dragging if already selected
               if (selectedImageId === img._id) {
                 e.stopPropagation();
                 setDraggingImageId(img._id);
                 setDragOffsetImage({
-                  x: e.clientX - img.x,
-                  y: e.clientY - img.y,
+                  x: e.clientX - (img.x - viewport.x),
+                  y: e.clientY - (img.y - viewport.y),
                 });
               }
             }}
@@ -1029,6 +1151,18 @@ export default function WhiteboardCanvas() {
             )}
           </div>
         ))}
+        {/* Minimap */}
+        <Minimap
+          strokes={strokes}
+          textBoxes={textBoxes}
+          images={images}
+          backgroundColor={backgroundColor}
+          canvasSize={canvasSize}
+          viewport={viewport}
+          minimapSize={minimapSize}
+          onMinimapClick={handleMinimapMoveViewport}
+        />
+        {/* No canvas border/line here */}
       </div>
       {/* Chatbox at the bottom */}
       {openPanel === "chat" && (
