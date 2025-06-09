@@ -66,6 +66,7 @@ export default function WhiteboardCanvas() {
   const [fillColor, setFillColor] = useState("#ffffff");
   const [backgroundColor, setBackgroundColor] = useState("#ffffff");
 
+  const [undoStack, setUndoStack] = useState([]);
   function getColorForName(name) {
     const colors = [
       "#2563eb",
@@ -124,7 +125,7 @@ export default function WhiteboardCanvas() {
   }, [isTextTool]);
 
   // Helper to redraw all events
-  const redraw = (allStrokes, allTextBoxes) => {
+  const redraw = (allStrokes, allTextBoxes, allImages = []) => {
     const canvas = canvasRef.current;
     const context = canvas.getContext("2d");
     // Fill background first
@@ -134,6 +135,8 @@ export default function WhiteboardCanvas() {
     context.fillRect(0, 0, canvas.width, canvas.height);
     context.restore();
 
+   
+    // Draw strokes (always on top of images)
     for (const stroke of allStrokes) {
       if (!stroke.points || stroke.points.length < 2) continue;
       context.beginPath();
@@ -145,6 +148,8 @@ export default function WhiteboardCanvas() {
       context.lineWidth = stroke.width || 2;
       context.stroke();
     }
+
+    // Draw text
     for (const box of allTextBoxes) {
       context.save();
       context.font = `${box.fontSize || 20}px Arial`;
@@ -256,6 +261,8 @@ export default function WhiteboardCanvas() {
     // --- IMAGE EVENTS ---
     newSocket.on("addImage", (img) => {
       setImages((prev) => [...prev, img]);
+      setUndoStack((prev) => [...prev, { type: "image-add", data: img }]);
+      setRedoStack([]);
     });
     newSocket.on("updateImage", (img) => {
       setImages((prev) =>
@@ -276,8 +283,8 @@ export default function WhiteboardCanvas() {
 
   // Redraw on state change
   useEffect(() => {
-    redraw(strokes, textBoxes);
-  }, [strokes, textBoxes, backgroundColor]);
+    redraw(strokes, textBoxes, images);
+  }, [strokes, textBoxes, images, backgroundColor]);
 
   // Mouse handlers for drawing and text box creation
   useEffect(() => {
@@ -297,11 +304,11 @@ export default function WhiteboardCanvas() {
       if (e.button !== 0) return;
       const pos = getMousePos(e);
 
-      // Text tool: start creating a text box
-      if (isTextTool) {
+      // Only create a text box if text tool is active and not already creating one
+      if (isTextTool && !creatingTextBox && !currentTextBox) {
         setCreatingTextBox(true);
         setTextBoxStart(pos);
-        setCurrentTextBox({ x: pos.x, y: pos.y, width: 0, height: 0 });
+        setCurrentTextBox({ x: pos.x, y: pos.y, width: 120, height: 30 });
         setTextInput("");
         setSelectedTextBoxId(null);
         return;
@@ -350,13 +357,15 @@ export default function WhiteboardCanvas() {
         return;
       }
       if (drawing.current && strokePoints.current.length > 1 && socket) {
-        socket.emit("drawStroke", {
-          points: strokePoints.current,
+        const strokeData = {
+          points: [...strokePoints.current],
           color: isEraser ? "#fff" : penColor,
           width: isEraser ? eraserWidth : penWidth,
           userId: userId.current,
-        });
-        setRedoStack([]); // Clear redo stack after new stroke
+        };
+        socket.emit("drawStroke", strokeData);
+        setUndoStack((prev) => [...prev, { type: "stroke", data: strokeData }]);
+        setRedoStack([]);
       }
       drawing.current = false;
       strokePoints.current = [];
@@ -412,27 +421,110 @@ export default function WhiteboardCanvas() {
 
   // Undo: only remove your own last stroke
   const handleUndo = () => {
-    if (!socket) return;
-    // Find last stroke by this user
-    const lastMyStroke = [...strokes]
-      .reverse()
-      .find((s) => s.userId === userId.current);
-    if (!lastMyStroke) return;
-    setRedoStack((prev) => [...prev, lastMyStroke]);
-    socket.emit("undoStroke", { whiteboardId });
+    if (undoStack.length === 0) return;
+    const lastAction = undoStack[undoStack.length - 1];
+    setUndoStack((prev) => prev.slice(0, -1));
+    setRedoStack((prev) => [...prev, lastAction]);
+
+    switch (lastAction.type) {
+      case "stroke":
+        // Remove last stroke (emit to backend)
+        socket.emit("undoStroke", { whiteboardId });
+        break;
+      case "image-add":
+        // Remove the image
+        socket.emit("removeImage", { _id: lastAction.data._id, whiteboardId });
+        break;
+      case "image-move":
+        // Move image back to previous position
+        socket.emit("updateImage", {
+          _id: lastAction.data._id,
+          x: lastAction.data.prevX,
+          y: lastAction.data.prevY,
+          width: lastAction.data.prevWidth,
+          height: lastAction.data.prevHeight,
+          whiteboardId,
+        });
+        break;
+      case "image-resize":
+        // Resize image back to previous size
+        socket.emit("updateImage", {
+          _id: lastAction.data._id,
+          x: lastAction.data.x,
+          y: lastAction.data.y,
+          width: lastAction.data.prevWidth,
+          height: lastAction.data.prevHeight,
+          whiteboardId,
+        });
+        break;
+      case "image-delete":
+        // Re-add the image
+        socket.emit("addImage", { ...lastAction.data, whiteboardId });
+        break;
+      case "fill":
+        // Restore previous background color
+        socket.emit("setBackgroundColor", {
+          color: lastAction.data.prevColor,
+          whiteboardId,
+        });
+        break;
+      default:
+        break;
+    }
   };
 
   // Redo: re-send the last undone stroke (if any)
   const handleRedo = () => {
-    if (!socket || redoStack.length === 0) return;
+    if (redoStack.length === 0) return;
     const lastRedo = redoStack[redoStack.length - 1];
-    socket.emit("drawStroke", {
-      points: lastRedo.points,
-      color: lastRedo.color,
-      width: lastRedo.width,
-      userId: userId.current,
-    });
     setRedoStack((prev) => prev.slice(0, -1));
+    setUndoStack((prev) => [...prev, lastRedo]);
+
+    switch (lastRedo.type) {
+      case "stroke":
+        // Redraw stroke
+        socket.emit("drawStroke", lastRedo.data);
+        break;
+      case "image-add":
+        // Re-add image
+        socket.emit("addImage", { ...lastRedo.data, whiteboardId });
+        break;
+      case "image-move":
+        // Move image to new position
+        socket.emit("updateImage", {
+          _id: lastRedo.data._id,
+          x: lastRedo.data.x,
+          y: lastRedo.data.y,
+          width: lastRedo.data.width,
+          height: lastRedo.data.height,
+          whiteboardId,
+        });
+        break;
+      case "image-resize":
+        // Resize image to new size
+        socket.emit("updateImage", {
+          _id: lastRedo.data._id,
+          x: lastRedo.data.x,
+          y: lastRedo.data.y,
+          width: lastRedo.data.width,
+          height: lastRedo.data.height,
+          whiteboardId,
+        });
+        break;
+      case "image-delete":
+        // Remove image again
+        socket.emit("removeImage", { _id: lastRedo.data._id, whiteboardId });
+        break;
+      case "fill":
+        // Set background color to new color
+        socket.emit("setBackgroundColor", {
+          color: fillColor,
+          whiteboardId,
+        });
+        break;
+      default:
+        break;
+    }
   };
 
   const handleClear = () => {
@@ -527,13 +619,13 @@ export default function WhiteboardCanvas() {
       const height = Math.min(window.innerHeight * 0.8, 800);
       canvas.width = width;
       canvas.height = height;
-      redraw(strokes, textBoxes);
+      redraw(strokes, textBoxes, images); // <-- Pass images here!
     };
     window.addEventListener("resize", handleResize);
     handleResize();
     return () => window.removeEventListener("resize", handleResize);
     // eslint-disable-next-line
-  }, [strokes, textBoxes]);
+  }, [strokes, textBoxes, images]); // <-- Also add images as a dependency
 
   // --- IMAGE HANDLING ---
 
@@ -669,6 +761,11 @@ export default function WhiteboardCanvas() {
   const handleCanvasMouseDown = (e) => {
     if (isFillTool && e.button === 0) {
       if (socket) {
+        setUndoStack((prev) => [
+          ...prev,
+          { type: "fill", data: { prevColor: backgroundColor } },
+        ]);
+        setRedoStack([]);
         socket.emit("setBackgroundColor", { color: fillColor, whiteboardId });
       }
       setIsFillTool(false);
