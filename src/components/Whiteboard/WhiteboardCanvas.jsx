@@ -5,6 +5,7 @@ import Toolbar from "./ToolBar.jsx";
 import CommentsSidebar from "./CommentsSidebar.jsx";
 import "../css/whiteboardcanvas.css";
 import ChatBox from "../Chatbox";
+import Minimap from "./Minimap.jsx";
 
 function getUserIdFromToken(token) {
   try {
@@ -21,6 +22,11 @@ function getUserFromToken(token) {
     return { userId: null, username: "Guest" };
   }
 }
+
+const INITIAL_CANVAS_WIDTH = 1600;
+const INITIAL_CANVAS_HEIGHT = 1200;
+const EXPAND_MARGIN = 80;
+const EXPAND_STEP = 800;
 
 export default function WhiteboardCanvas() {
   const { id: whiteboardId } = useParams();
@@ -43,11 +49,12 @@ export default function WhiteboardCanvas() {
   const [isEraser, setIsEraser] = useState(false);
   const [eraserWidth, setEraserWidth] = useState(20);
   const [isTextTool, setIsTextTool] = useState(false);
+  const [isMoveTool, setIsMoveTool] = useState(false);
   const [collaborators, setCollaborators] = useState([]);
   // Text box states
   const [creatingTextBox, setCreatingTextBox] = useState(false);
   const [textBoxStart, setTextBoxStart] = useState(null);
-  const [currentTextBox, setCurrentTextBox] = useState(null); // For creating or editing
+  const [currentTextBox, setCurrentTextBox] = useState(null);
   const [textInput, setTextInput] = useState("");
   const [selectedTextBoxId, setSelectedTextBoxId] = useState(null);
   const [editingTextBoxId, setEditingTextBoxId] = useState(null);
@@ -65,6 +72,33 @@ export default function WhiteboardCanvas() {
   const [isFillTool, setIsFillTool] = useState(false);
   const [fillColor, setFillColor] = useState("#ffffff");
   const [backgroundColor, setBackgroundColor] = useState("#ffffff");
+  const [prevBackgroundColor, setPrevBackgroundColor] = useState("#ffffff");
+
+  const [isShapeTool, setIsShapeTool] = useState(false);
+  const [selectedShape, setSelectedShape] = useState("rectangle");
+  const [shapes, setShapes] = useState([]);
+  const [creatingShape, setCreatingShape] = useState(false);
+  const [currentShape, setCurrentShape] = useState(null);
+  const [selectedShapeId, setSelectedShapeId] = useState(null);
+  const [draggingShapeId, setDraggingShapeId] = useState(null);
+  const [resizingShapeId, setResizingShapeId] = useState(null);
+  const [dragOffsetShape, setDragOffsetShape] = useState({ x: 0, y: 0 });
+
+  // --- Expandable canvas state ---
+  const [canvasSize, setCanvasSize] = useState({
+    width: INITIAL_CANVAS_WIDTH,
+    height: INITIAL_CANVAS_HEIGHT,
+  });
+  const [viewport, setViewport] = useState({ x: 0, y: 0 });
+  const [isPanning, setIsPanning] = useState(false);
+  const panStart = useRef({ x: 0, y: 0 });
+  const viewportStart = useRef({ x: 0, y: 0 });
+
+  // --- Minimap ---
+  const minimapSize = { width: 200, height: 150 };
+  function handleMinimapMoveViewport({ x, y }) {
+    setViewport({ x, y });
+  }
 
   const [undoStack, setUndoStack] = useState([]);
   function getColorForName(name) {
@@ -106,36 +140,42 @@ export default function WhiteboardCanvas() {
 
   // Tool switching logic
   useEffect(() => {
-    if (isPen) {
-      setIsEraser(false);
-      setIsTextTool(false);
-    }
-  }, [isPen]);
-  useEffect(() => {
-    if (isEraser) {
-      setIsPen(false);
-      setIsTextTool(false);
-    }
-  }, [isEraser]);
-  useEffect(() => {
-    if (isTextTool) {
+    // If no tool is selected, default to pen
+    if (!isPen && !isEraser && !isTextTool && !isMoveTool && !isShapeTool)
+      setIsPen(true);
+    // If move tool is selected, disable all others
+    if (isMoveTool) {
       setIsPen(false);
       setIsEraser(false);
+      setIsTextTool(false);
+      setIsShapeTool(false);
     }
-  }, [isTextTool]);
+    // If any other tool is selected, disable move tool
+    if ((isPen || isEraser || isTextTool || isShapeTool) && isMoveTool)
+      setIsMoveTool(false);
+  }, [isPen, isEraser, isTextTool, isMoveTool, isShapeTool]);
 
   // Helper to redraw all events
   const redraw = (allStrokes, allTextBoxes, allImages = []) => {
     const canvas = canvasRef.current;
     const context = canvas.getContext("2d");
-    // Fill background first
     context.save();
     context.globalCompositeOperation = "source-over";
+    context.setTransform(1, 0, 0, 1, 0, 0);
+    context.clearRect(0, 0, canvas.width, canvas.height);
     context.fillStyle = backgroundColor;
     context.fillRect(0, 0, canvas.width, canvas.height);
     context.restore();
 
-   
+    // Pan/viewport
+    context.save();
+    context.translate(-viewport.x, -viewport.y);
+
+    // Draw shapes
+    for (const shape of shapes) {
+      drawShape(context, shape);
+    }
+
     // Draw strokes (always on top of images)
     for (const stroke of allStrokes) {
       if (!stroke.points || stroke.points.length < 2) continue;
@@ -144,7 +184,8 @@ export default function WhiteboardCanvas() {
       for (let i = 1; i < stroke.points.length; i++) {
         context.lineTo(stroke.points[i].x, stroke.points[i].y);
       }
-      context.strokeStyle = stroke.color || "black";
+      context.strokeStyle =
+        stroke.color === "#fff" ? backgroundColor : stroke.color || "black";
       context.lineWidth = stroke.width || 2;
       context.stroke();
     }
@@ -157,6 +198,12 @@ export default function WhiteboardCanvas() {
       context.fillText(box.text, box.x, box.y + (box.fontSize || 20));
       context.restore();
     }
+    // for (const img of images) {
+    //   const imageObj = new window.Image();
+    //   imageObj.src = img.src;
+    //   context.drawImage(imageObj, img.x, img.y, img.width, img.height);
+    // }
+    context.restore();
   };
 
   // Set user info and connect socket
@@ -197,6 +244,8 @@ export default function WhiteboardCanvas() {
     // Draw a single stroke
     const drawStroke = (stroke) => {
       if (!stroke.points || stroke.points.length < 2) return;
+      context.save();
+      context.translate(-viewport.x, -viewport.y);
       context.beginPath();
       context.moveTo(stroke.points[0].x, stroke.points[0].y);
       for (let i = 1; i < stroke.points.length; i++) {
@@ -205,18 +254,19 @@ export default function WhiteboardCanvas() {
       context.strokeStyle = stroke.color || "black";
       context.lineWidth = stroke.width || 2;
       context.stroke();
+      context.restore();
     };
 
     // Draw a single text box
     const drawTextBox = (box) => {
       context.save();
+      context.translate(-viewport.x, -viewport.y);
       context.font = `${box.fontSize || 20}px Arial`;
       context.fillStyle = box.color || "#222";
       context.fillText(box.text, box.x, box.y + (box.fontSize || 20));
       context.restore();
     };
 
-    // On initial load, backend will replay all events
     newSocket.on("drawStroke", (stroke) => {
       setStrokes((prev) => [...prev, stroke]);
       drawStroke(stroke);
@@ -254,8 +304,8 @@ export default function WhiteboardCanvas() {
       setStrokes([]);
       setTextBoxes([]);
       setRedoStack([]);
-      setImages([]); // <-- Add this
-      setBackgroundColor("#ffffff"); // <-- Add this (or your default)
+      setImages([]);
+      setBackgroundColor("#ffffff");
     });
 
     // --- IMAGE EVENTS ---
@@ -279,14 +329,35 @@ export default function WhiteboardCanvas() {
     return () => {
       newSocket.disconnect();
     };
-  }, [whiteboardId, navigate]);
+  }, [whiteboardId, navigate, viewport.x, viewport.y]);
 
   // Redraw on state change
   useEffect(() => {
-    redraw(strokes, textBoxes, images);
-  }, [strokes, textBoxes, images, backgroundColor]);
+    redraw(strokes, textBoxes, images, shapes);
+  }, [strokes, textBoxes, backgroundColor, images, shapes]);
 
-  // Mouse handlers for drawing and text box creation
+  // --- Canvas expansion logic ---
+  function expandCanvasIfNeeded(point) {
+    let { width, height } = canvasSize;
+    let expanded = false;
+    if (point.x > width - EXPAND_MARGIN) {
+      width += EXPAND_STEP;
+      expanded = true;
+    }
+    if (point.y > height - EXPAND_MARGIN) {
+      height += EXPAND_STEP;
+      expanded = true;
+    }
+    if (point.x < EXPAND_MARGIN && viewport.x > 0) {
+      setViewport((v) => ({ ...v, x: Math.max(0, v.x - EXPAND_STEP) }));
+    }
+    if (point.y < EXPAND_MARGIN && viewport.y > 0) {
+      setViewport((v) => ({ ...v, y: Math.max(0, v.y - EXPAND_STEP) }));
+    }
+    if (expanded) setCanvasSize({ width, height });
+  }
+
+  // Mouse handlers for drawing, text, and panning
   useEffect(() => {
     const canvas = canvasRef.current;
     const context = canvas.getContext("2d");
@@ -294,13 +365,37 @@ export default function WhiteboardCanvas() {
     const getMousePos = (e) => {
       const rect = canvas.getBoundingClientRect();
       return {
-        x: e.clientX - rect.left,
-        y: e.clientY - rect.top,
+        x: e.clientX - rect.left + viewport.x,
+        y: e.clientY - rect.top + viewport.y,
       };
     };
 
-    // --- Drawing/Eraser ---
     const handleMouseDown = (e) => {
+      // Pan tool: left mouse if move tool is active
+      if (isShapeTool && !creatingShape && !currentShape) {
+        const pos = getMousePos(e);
+        setCreatingShape(true);
+        setCurrentShape({
+          type: selectedShape,
+          x: pos.x,
+          y: pos.y,
+          x2: pos.x,
+          y2: pos.y,
+          color: penColor,
+          width: penWidth,
+          id: "local-" + Math.random(),
+        });
+        setSelectedShapeId(null);
+        return;
+      }
+
+      if ((isMoveTool || isPanning) && (e.button === 0 || e.button === 1)) {
+        setIsPanning(true);
+        panStart.current = { x: e.clientX, y: e.clientY };
+        viewportStart.current = { ...viewport };
+        return;
+      }
+
       if (e.button !== 0) return;
       const pos = getMousePos(e);
 
@@ -322,6 +417,35 @@ export default function WhiteboardCanvas() {
     };
 
     const handleMouseMove = (e) => {
+      if (isShapeTool && creatingShape && currentShape) {
+        const pos = getMousePos(e);
+        setCurrentShape((prev) => ({
+          ...prev,
+          x2: pos.x,
+          y2: pos.y,
+        }));
+        return;
+      }
+      if (isPanning) {
+        setViewport((v) => ({
+          x: Math.max(
+            0,
+            Math.min(
+              canvasSize.width - canvas.width,
+              viewportStart.current.x - (e.clientX - panStart.current.x)
+            )
+          ),
+          y: Math.max(
+            0,
+            Math.min(
+              canvasSize.height - canvas.height,
+              viewportStart.current.y - (e.clientY - panStart.current.y)
+            )
+          ),
+        }));
+        return;
+      }
+
       if (isTextTool && creatingTextBox && textBoxStart) {
         const pos = getMousePos(e);
         setCurrentTextBox({
@@ -330,36 +454,67 @@ export default function WhiteboardCanvas() {
           width: Math.abs(pos.x - textBoxStart.x),
           height: Math.abs(pos.y - textBoxStart.y),
         });
+        expandCanvasIfNeeded(pos);
         return;
       }
       if (!drawing.current) return;
       const newPoint = getMousePos(e);
       strokePoints.current.push(newPoint);
 
+      context.save();
+      context.translate(-viewport.x, -viewport.y);
       context.beginPath();
       context.moveTo(
         strokePoints.current[strokePoints.current.length - 2].x,
         strokePoints.current[strokePoints.current.length - 2].y
       );
       context.lineTo(newPoint.x, newPoint.y);
-      context.strokeStyle = isEraser ? "#fff" : penColor;
+      context.strokeStyle = isEraser ? backgroundColor : penColor;
       context.lineWidth = isEraser ? eraserWidth : penWidth;
       context.stroke();
+      context.restore();
+
+      expandCanvasIfNeeded(newPoint);
     };
 
     const handleMouseUp = (e) => {
+      if (isShapeTool && creatingShape && currentShape) {
+        // Save shape
+        const shape = {
+          type: currentShape.type,
+          x: currentShape.x,
+          y: currentShape.y,
+          x2: currentShape.x2,
+          y2: currentShape.y2,
+          color: currentShape.color,
+          width: currentShape.width,
+          whiteboardId,
+        };
+        socket.emit("addShape", shape);
+        setCreatingShape(false);
+        setCurrentShape(null);
+        return;
+      }
+      if (isPanning) {
+        setIsPanning(false);
+        return;
+      }
       if (isTextTool && creatingTextBox && currentTextBox) {
         setCreatingTextBox(false);
         setTimeout(() => {
           const input = document.getElementById("canvas-text-input");
           if (input) input.focus();
         }, 0);
+        expandCanvasIfNeeded({
+          x: currentTextBox.x + currentTextBox.width,
+          y: currentTextBox.y + currentTextBox.height,
+        });
         return;
       }
       if (drawing.current && strokePoints.current.length > 1 && socket) {
         const strokeData = {
           points: [...strokePoints.current],
-          color: isEraser ? "#fff" : penColor,
+          color: isEraser ? backgroundColor : penColor,
           width: isEraser ? eraserWidth : penWidth,
           userId: userId.current,
         };
@@ -390,6 +545,15 @@ export default function WhiteboardCanvas() {
     creatingTextBox,
     currentTextBox,
     textBoxStart,
+    isPanning,
+    viewport,
+    canvasSize,
+    isPen,
+    isMoveTool,
+    isShapeTool,
+    creatingShape,
+    currentShape,
+    selectedShape,
   ]);
 
   // Drag to move text box
@@ -398,11 +562,12 @@ export default function WhiteboardCanvas() {
     const handleMove = (e) => {
       const canvas = canvasRef.current;
       const rect = canvas.getBoundingClientRect();
-      const x = e.clientX - rect.left - dragOffset.x;
-      const y = e.clientY - rect.top - dragOffset.y;
+      const x = e.clientX - rect.left + viewport.x - dragOffset.x;
+      const y = e.clientY - rect.top + viewport.y - dragOffset.y;
       setTextBoxes((prev) =>
         prev.map((box) => (box._id === draggingBoxId ? { ...box, x, y } : box))
       );
+      expandCanvasIfNeeded({ x, y });
     };
     const handleUp = () => {
       const box = textBoxes.find((b) => b._id === draggingBoxId);
@@ -417,56 +582,45 @@ export default function WhiteboardCanvas() {
       window.removeEventListener("mousemove", handleMove);
       window.removeEventListener("mouseup", handleUp);
     };
-  }, [draggingBoxId, dragOffset, socket, textBoxes, whiteboardId]);
+  }, [
+    draggingBoxId,
+    dragOffset,
+    socket,
+    textBoxes,
+    whiteboardId,
+    viewport,
+    canvasSize,
+  ]);
 
   // Undo: only remove your own last stroke
   const handleUndo = () => {
-    if (undoStack.length === 0) return;
+    if (!socket || undoStack.length === 0) return;
     const lastAction = undoStack[undoStack.length - 1];
     setUndoStack((prev) => prev.slice(0, -1));
     setRedoStack((prev) => [...prev, lastAction]);
 
     switch (lastAction.type) {
       case "stroke":
-        // Remove last stroke (emit to backend)
+        // Remove last stroke by this user
         socket.emit("undoStroke", { whiteboardId });
+        break;
+      case "fill":
+        // Undo fill by restoring previous color
+        socket.emit("setBackgroundColor", {
+          color: lastAction.data.prevColor,
+          whiteboardId,
+        });
         break;
       case "image-add":
         // Remove the image
         socket.emit("removeImage", { _id: lastAction.data._id, whiteboardId });
         break;
-      case "image-move":
-        // Move image back to previous position
-        socket.emit("updateImage", {
-          _id: lastAction.data._id,
-          x: lastAction.data.prevX,
-          y: lastAction.data.prevY,
-          width: lastAction.data.prevWidth,
-          height: lastAction.data.prevHeight,
-          whiteboardId,
-        });
+      case "shape-add":
+        socket.emit("removeShape", { _id: lastAction.data._id, whiteboardId });
         break;
-      case "image-resize":
-        // Resize image back to previous size
-        socket.emit("updateImage", {
-          _id: lastAction.data._id,
-          x: lastAction.data.x,
-          y: lastAction.data.y,
-          width: lastAction.data.prevWidth,
-          height: lastAction.data.prevHeight,
-          whiteboardId,
-        });
+      case "shape-delete":
+        socket.emit("addShape", { ...lastAction.data, whiteboardId });
         break;
-      case "image-delete":
-        // Re-add the image
-        socket.emit("addImage", { ...lastAction.data, whiteboardId });
-        break;
-      case "fill":
-        // Restore previous background color
-        socket.emit("setBackgroundColor", {
-          color: lastAction.data.prevColor,
-          whiteboardId,
-        });
         break;
       default:
         break;
@@ -475,52 +629,30 @@ export default function WhiteboardCanvas() {
 
   // Redo: re-send the last undone stroke (if any)
   const handleRedo = () => {
-    if (redoStack.length === 0) return;
+    if (!socket || redoStack.length === 0) return;
     const lastRedo = redoStack[redoStack.length - 1];
     setRedoStack((prev) => prev.slice(0, -1));
     setUndoStack((prev) => [...prev, lastRedo]);
 
     switch (lastRedo.type) {
       case "stroke":
-        // Redraw stroke
         socket.emit("drawStroke", lastRedo.data);
         break;
-      case "image-add":
-        // Re-add image
-        socket.emit("addImage", { ...lastRedo.data, whiteboardId });
-        break;
-      case "image-move":
-        // Move image to new position
-        socket.emit("updateImage", {
-          _id: lastRedo.data._id,
-          x: lastRedo.data.x,
-          y: lastRedo.data.y,
-          width: lastRedo.data.width,
-          height: lastRedo.data.height,
-          whiteboardId,
-        });
-        break;
-      case "image-resize":
-        // Resize image to new size
-        socket.emit("updateImage", {
-          _id: lastRedo.data._id,
-          x: lastRedo.data.x,
-          y: lastRedo.data.y,
-          width: lastRedo.data.width,
-          height: lastRedo.data.height,
-          whiteboardId,
-        });
-        break;
-      case "image-delete":
-        // Remove image again
-        socket.emit("removeImage", { _id: lastRedo.data._id, whiteboardId });
-        break;
       case "fill":
-        // Set background color to new color
         socket.emit("setBackgroundColor", {
           color: fillColor,
           whiteboardId,
         });
+        break;
+      case "image-add":
+        socket.emit("addImage", { ...lastRedo.data, whiteboardId });
+        break;
+      case "shape-add":
+        socket.emit("addShape", { ...lastRedo.data, whiteboardId });
+        break;
+      case "shape-delete":
+        socket.emit("removeShape", { _id: lastRedo.data._id, whiteboardId });
+        break;
         break;
       default:
         break;
@@ -532,8 +664,8 @@ export default function WhiteboardCanvas() {
     setRedoStack([]);
     setStrokes([]);
     setTextBoxes([]);
-    setImages([]); // <-- Add this
-    setBackgroundColor("#ffffff"); // <-- Add this (or your default)
+    setImages([]);
+    setBackgroundColor("#ffffff");
     const ctx = canvasRef.current.getContext("2d");
     ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
     socket.emit("clearBoard", { whiteboardId });
@@ -545,7 +677,6 @@ export default function WhiteboardCanvas() {
     if (!socket || !currentTextBox || !textInput.trim()) return;
     const fontSize = Math.max(16, Math.floor(currentTextBox.height));
     if (editingTextBoxId) {
-      // Update existing text box
       socket.emit("updateTextBox", {
         _id: editingTextBoxId,
         x: currentTextBox.x,
@@ -559,7 +690,6 @@ export default function WhiteboardCanvas() {
         whiteboardId,
       });
     } else {
-      // Create new text box
       socket.emit("addTextBox", {
         x: currentTextBox.x,
         y: currentTextBox.y,
@@ -615,17 +745,18 @@ export default function WhiteboardCanvas() {
     const handleResize = () => {
       const canvas = canvasRef.current;
       if (!canvas) return;
-      const width = Math.min(window.innerWidth * 0.9, 1200);
-      const height = Math.min(window.innerHeight * 0.8, 800);
+      // Full viewport
+      const width = window.innerWidth;
+      const height = window.innerHeight - 56; // minus toolbar
       canvas.width = width;
       canvas.height = height;
-      redraw(strokes, textBoxes, images); // <-- Pass images here!
+      redraw(strokes, textBoxes, images, shapes); // <-- Pass images here!
     };
     window.addEventListener("resize", handleResize);
     handleResize();
     return () => window.removeEventListener("resize", handleResize);
     // eslint-disable-next-line
-  }, [strokes, textBoxes, images]); // <-- Also add images as a dependency
+  }, [strokes, textBoxes, shapes]);
 
   // --- IMAGE HANDLING ---
 
@@ -640,11 +771,10 @@ export default function WhiteboardCanvas() {
         const maxWidth = 300;
         const width = Math.min(img.width, maxWidth);
         const height = width / aspect;
-        // Send to backend
         socket.emit("addImage", {
           src: ev.target.result,
-          x: 100,
-          y: 100,
+          x: 100 + viewport.x,
+          y: 100 + viewport.y,
           width,
           height,
           whiteboardId,
@@ -665,8 +795,8 @@ export default function WhiteboardCanvas() {
           img._id === draggingImageId
             ? {
                 ...img,
-                x: e.clientX - dragOffsetImage.x,
-                y: e.clientY - dragOffsetImage.y,
+                x: e.clientX - dragOffsetImage.x + viewport.x,
+                y: e.clientY - dragOffsetImage.y + viewport.y,
               }
             : img
         )
@@ -692,7 +822,14 @@ export default function WhiteboardCanvas() {
       window.removeEventListener("mousemove", handleMove);
       window.removeEventListener("mouseup", handleUp);
     };
-  }, [draggingImageId, dragOffsetImage, images, socket, whiteboardId]);
+  }, [
+    draggingImageId,
+    dragOffsetImage,
+    images,
+    socket,
+    whiteboardId,
+    viewport,
+  ]);
 
   // Resize image
   useEffect(() => {
@@ -705,7 +842,6 @@ export default function WhiteboardCanvas() {
           const dy = e.movementY;
           let newWidth = img.width + dx;
           let newHeight = img.height + dy;
-          // Keep aspect ratio
           const aspect = img.width / img.height;
           if (Math.abs(dx) > Math.abs(dy)) {
             newHeight = newWidth / aspect;
@@ -779,8 +915,225 @@ export default function WhiteboardCanvas() {
     return () => socket.off("setBackgroundColor", handleSetBackgroundColor);
   }, [socket]);
 
+  useEffect(() => {
+    setStrokes((prev) =>
+      prev.map((stroke) =>
+        stroke.color === prevBackgroundColor
+          ? { ...stroke, color: backgroundColor }
+          : stroke
+      )
+    );
+    setPrevBackgroundColor(backgroundColor);
+  }, [backgroundColor]);
+
+  const drawShape = (ctx, shape) => {
+    ctx.save();
+    ctx.strokeStyle = shape.color || "#000";
+    ctx.lineWidth = shape.width || 2;
+    const { x, y, x2, y2, type } = shape;
+    switch (type) {
+      case "rectangle":
+        ctx.strokeRect(
+          Math.min(x, x2),
+          Math.min(y, y2),
+          Math.abs(x2 - x),
+          Math.abs(y2 - y)
+        );
+        break;
+      case "circle": {
+        const cx = (x + x2) / 2;
+        const cy = (y + y2) / 2;
+        const rx = Math.abs(x2 - x) / 2;
+        const ry = Math.abs(y2 - y) / 2;
+        ctx.beginPath();
+        ctx.ellipse(cx, cy, rx, ry, 0, 0, 2 * Math.PI);
+        ctx.stroke();
+        break;
+      }
+      case "line":
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
+        break;
+      case "diamond": {
+        const cx = (x + x2) / 2;
+        const cy = (y + y2) / 2;
+        const w = Math.abs(x2 - x) / 2;
+        const h = Math.abs(y2 - y) / 2;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy - h);
+        ctx.lineTo(cx + w, cy);
+        ctx.lineTo(cx, cy + h);
+        ctx.lineTo(cx - w, cy);
+        ctx.closePath();
+        ctx.stroke();
+        break;
+      }
+      case "triangle":
+        ctx.beginPath();
+        ctx.moveTo((x + x2) / 2, y);
+        ctx.lineTo(x2, y2);
+        ctx.lineTo(x, y2);
+        ctx.closePath();
+        ctx.stroke();
+        break;
+      case "curve":
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.bezierCurveTo(x, y2, x2, y, x2, y2);
+        ctx.stroke();
+        break;
+      default:
+        break;
+    }
+    ctx.restore();
+  };
+
+  useEffect(() => {
+    if (!draggingShapeId) return;
+    const handleMove = (e) => {
+      setShapes((prev) =>
+        prev.map((shape) =>
+          shape._id === draggingShapeId
+            ? {
+                ...shape,
+                x: e.clientX - dragOffsetShape.x + viewport.x,
+                y: e.clientY - dragOffsetShape.y + viewport.y,
+                x2:
+                  e.clientX -
+                  dragOffsetShape.x +
+                  viewport.x +
+                  Math.abs(shape.x2 - shape.x),
+                y2:
+                  e.clientY -
+                  dragOffsetShape.y +
+                  viewport.y +
+                  Math.abs(shape.y2 - shape.y),
+              }
+            : shape
+        )
+      );
+    };
+    const handleUp = () => {
+      const shape = shapes.find((s) => s._id === draggingShapeId);
+      if (shape && socket) {
+        socket.emit("updateShape", {
+          _id: shape._id,
+          x: shape.x,
+          y: shape.y,
+          x2: shape.x2,
+          y2: shape.y2,
+          color: shape.color,
+          width: shape.width,
+          whiteboardId,
+        });
+      }
+      setDraggingShapeId(null);
+    };
+    window.addEventListener("mousemove", handleMove);
+    window.addEventListener("mouseup", handleUp);
+    return () => {
+      window.removeEventListener("mousemove", handleMove);
+      window.removeEventListener("mouseup", handleUp);
+    };
+  }, [
+    draggingShapeId,
+    dragOffsetShape,
+    viewport,
+    shapes,
+    socket,
+    whiteboardId,
+  ]);
+
+  // Resize shape
+  useEffect(() => {
+    if (!resizingShapeId) return;
+    const handleMove = (e) => {
+      setShapes((prev) =>
+        prev.map((shape) => {
+          if (shape._id !== resizingShapeId) return shape;
+          const dx = e.movementX;
+          const dy = e.movementY;
+          return {
+            ...shape,
+            x2: shape.x2 + dx,
+            y2: shape.y2 + dy,
+          };
+        })
+      );
+    };
+    const handleUp = () => {
+      const shape = shapes.find((s) => s._id === resizingShapeId);
+      if (shape && socket) {
+        socket.emit("updateShape", {
+          _id: shape._id,
+          x: shape.x,
+          y: shape.y,
+          x2: shape.x2,
+          y2: shape.y2,
+          color: shape.color,
+          width: shape.width,
+          whiteboardId,
+        });
+      }
+      setResizingShapeId(null);
+    };
+    window.addEventListener("mousemove", handleMove);
+    window.addEventListener("mouseup", handleUp);
+    return () => {
+      window.removeEventListener("mousemove", handleMove);
+      window.removeEventListener("mouseup", handleUp);
+    };
+  }, [resizingShapeId, shapes, socket, whiteboardId]);
+
+  useEffect(() => {
+    if (!socket) return;
+
+    socket.on("addShape", (shape) => {
+      // Map shapeType to type for frontend consistency
+      const normalizedShape = {
+        ...shape,
+        type:
+          shape.type === "shape" && shape.shapeType
+            ? shape.shapeType
+            : shape.type,
+      };
+      setShapes((prev) => [...prev, normalizedShape]);
+      setUndoStack((prev) => [
+        ...prev,
+        { type: "shape-add", data: normalizedShape },
+      ]);
+      setRedoStack([]);
+    });
+
+    socket.on("updateShape", (shape) => {
+      setShapes((prev) =>
+        prev.map((s) =>
+          String(s._id) === String(shape._id)
+            ? { ...s, ...shape, type: shape.shapeType || s.type }
+            : s
+        )
+      );
+    });
+
+    socket.on("removeShape", ({ _id }) => {
+      setShapes((prev) => prev.filter((s) => String(s._id) !== String(_id)));
+      setSelectedShapeId((id) => (id === _id ? null : id));
+    });
+
+    return () => {
+      socket.off("addShape");
+      socket.off("updateShape");
+      socket.off("removeShape");
+    };
+  }, [socket]);
+
   return (
-    <div className="whiteboard-canvas-page">
+    <div
+      className="whiteboard-canvas-page"
+      style={{ height: "100vh", width: "100vw", padding: 0, margin: 0 }}
+    >
       {userId.current && userId.current.startsWith("guest-") && (
         <div style={{ background: "#ffeeba", padding: 8, textAlign: "center" }}>
           You are editing as a guest. <a href="/login">Login</a> to save your
@@ -799,6 +1152,7 @@ export default function WhiteboardCanvas() {
           top: 0,
           zIndex: 10,
           padding: "0 24px",
+          // height: 56,
         }}
       >
         {/* Editable whiteboard name */}
@@ -872,6 +1226,12 @@ export default function WhiteboardCanvas() {
             setIsFillTool={setIsFillTool}
             fillColor={fillColor}
             setFillColor={setFillColor}
+            isMoveTool={isMoveTool}
+            setIsMoveTool={setIsMoveTool}
+            isShapeTool={isShapeTool}
+            setIsShapeTool={setIsShapeTool}
+            selectedShape={selectedShape}
+            setSelectedShape={setSelectedShape}
           />
         </div>
         {/* Collaborators avatars */}
@@ -921,7 +1281,15 @@ export default function WhiteboardCanvas() {
       {/* Canvas and overlays */}
       <div
         className="canvas-wrapper"
-        style={{ position: "relative" }}
+        style={{
+          position: "relative",
+          background: "#f3f3f3",
+          width: "100vw",
+          height: "calc(100vh - 56px)",
+          minHeight: 0,
+          minWidth: 0,
+          overflow: "hidden",
+        }}
         onClick={() => {
           setSelectedImageId(null);
           setEditingTextBoxId(null);
@@ -931,6 +1299,22 @@ export default function WhiteboardCanvas() {
         <canvas
           ref={canvasRef}
           className="whiteboard-canvas"
+          width={window.innerWidth}
+          height={window.innerHeight - 56}
+          style={{
+            background: "#fff",
+            cursor:
+              isMoveTool || isPanning
+                ? "grab"
+                : isPen
+                ? "crosshair"
+                : isTextTool
+                ? "text"
+                : "default",
+            display: "block",
+            width: "100vw",
+            height: "calc(100vh - 56px)",
+          }}
           onMouseDown={handleCanvasMouseDown}
         />
         {/* Text box overlays for selection, editing, and moving */}
@@ -939,8 +1323,8 @@ export default function WhiteboardCanvas() {
             key={box._id}
             style={{
               position: "absolute",
-              left: box.x,
-              top: box.y,
+              left: box.x - viewport.x,
+              top: box.y - viewport.y,
               width: box.width || 120,
               height: box.height || 30,
               border:
@@ -968,11 +1352,11 @@ export default function WhiteboardCanvas() {
                 setDragOffset({
                   x:
                     e.clientX -
-                    box.x -
+                    (box.x - viewport.x) -
                     canvasRef.current.getBoundingClientRect().left,
                   y:
                     e.clientY -
-                    box.y -
+                    (box.y - viewport.y) -
                     canvasRef.current.getBoundingClientRect().top,
                 });
               }
@@ -987,8 +1371,8 @@ export default function WhiteboardCanvas() {
             onSubmit={handleTextSubmit}
             style={{
               position: "absolute",
-              left: currentTextBox?.x,
-              top: currentTextBox?.y,
+              left: currentTextBox?.x - viewport.x,
+              top: currentTextBox?.y - viewport.y,
               width: currentTextBox?.width || 120,
               height: currentTextBox?.height || 30,
               background: "rgba(255,255,255,0.8)",
@@ -1025,8 +1409,8 @@ export default function WhiteboardCanvas() {
           <div
             style={{
               position: "absolute",
-              left: currentTextBox.x,
-              top: currentTextBox.y,
+              left: currentTextBox.x - viewport.x,
+              top: currentTextBox.y - viewport.y,
               width: currentTextBox.width,
               height: currentTextBox.height,
               border: "1px dashed #888",
@@ -1037,13 +1421,112 @@ export default function WhiteboardCanvas() {
           />
         )}
 
+        {isShapeTool && creatingShape && currentShape && (
+          <div
+            style={{
+              position: "absolute",
+              left: Math.min(currentShape.x, currentShape.x2) - viewport.x,
+              top: Math.min(currentShape.y, currentShape.y2) - viewport.y,
+              width: Math.abs(currentShape.x2 - currentShape.x),
+              height: Math.abs(currentShape.y2 - currentShape.y),
+              pointerEvents: "none",
+              zIndex: 15,
+            }}
+          >
+            <svg
+              width={Math.abs(currentShape.x2 - currentShape.x)}
+              height={Math.abs(currentShape.y2 - currentShape.y)}
+              style={{ width: "100%", height: "100%" }}
+            >
+              {(() => {
+                const w = Math.abs(currentShape.x2 - currentShape.x);
+                const h = Math.abs(currentShape.y2 - currentShape.y);
+                switch (currentShape.type) {
+                  case "rectangle":
+                    return (
+                      <rect
+                        x={0}
+                        y={0}
+                        width={w}
+                        height={h}
+                        fill="none"
+                        stroke={currentShape.color}
+                        strokeWidth={currentShape.width}
+                        strokeDasharray="4"
+                      />
+                    );
+                  case "circle":
+                    return (
+                      <ellipse
+                        cx={w / 2}
+                        cy={h / 2}
+                        rx={w / 2}
+                        ry={h / 2}
+                        fill="none"
+                        stroke={currentShape.color}
+                        strokeWidth={currentShape.width}
+                        strokeDasharray="4"
+                      />
+                    );
+                  case "line":
+                    return (
+                      <line
+                        x1={0}
+                        y1={0}
+                        x2={w}
+                        y2={h}
+                        stroke={currentShape.color}
+                        strokeWidth={currentShape.width}
+                        strokeDasharray="4"
+                      />
+                    );
+                  case "diamond":
+                    return (
+                      <polygon
+                        points={`${w / 2},0 ${w},${h / 2} ${w / 2},${h} 0,${
+                          h / 2
+                        }`}
+                        fill="none"
+                        stroke={currentShape.color}
+                        strokeWidth={currentShape.width}
+                        strokeDasharray="4"
+                      />
+                    );
+                  case "triangle":
+                    return (
+                      <polygon
+                        points={`${w / 2},0 ${w},${h} 0,${h}`}
+                        fill="none"
+                        stroke={currentShape.color}
+                        strokeWidth={currentShape.width}
+                        strokeDasharray="4"
+                      />
+                    );
+                  case "curve":
+                    return (
+                      <path
+                        d={`M0,0 C0,${h} ${w},0 ${w},${h}`}
+                        fill="none"
+                        stroke={currentShape.color}
+                        strokeWidth={currentShape.width}
+                        strokeDasharray="4"
+                      />
+                    );
+                  default:
+                    return null;
+                }
+              })()}
+            </svg>
+          </div>
+        )}
+
         {images.map((img) => (
           <div
             key={img._id}
             style={{
               position: "absolute",
-              left: img.x,
-              top: img.y,
+              left: img.x - viewport.x,
+              top: img.y - viewport.y,
               width: img.width,
               height: img.height,
               border:
@@ -1059,13 +1542,12 @@ export default function WhiteboardCanvas() {
               setSelectedImageId(img._id);
             }}
             onMouseDown={(e) => {
-              // Only start dragging if already selected
               if (selectedImageId === img._id) {
                 e.stopPropagation();
                 setDraggingImageId(img._id);
                 setDragOffsetImage({
-                  x: e.clientX - img.x,
-                  y: e.clientY - img.y,
+                  x: e.clientX - (img.x - viewport.x),
+                  y: e.clientY - (img.y - viewport.y),
                 });
               }
             }}
@@ -1126,6 +1608,110 @@ export default function WhiteboardCanvas() {
             )}
           </div>
         ))}
+
+        {shapes.map((shape) => (
+          <div
+            key={shape._id}
+            style={{
+              position: "absolute",
+              left: Math.min(shape.x, shape.x2) - viewport.x,
+              top: Math.min(shape.y, shape.y2) - viewport.y,
+              width: Math.abs(shape.x2 - shape.x),
+              height: Math.abs(shape.y2 - shape.y),
+              border:
+                selectedShapeId === shape._id
+                  ? "2px solid #ff9800"
+                  : "1px dashed transparent",
+              background: "transparent",
+              zIndex: 9,
+              cursor: draggingShapeId === shape._id ? "grabbing" : "pointer",
+              pointerEvents: isShapeTool ? "auto" : "none",
+            }}
+            onClick={(e) => {
+              e.stopPropagation();
+              setSelectedShapeId(shape._id);
+            }}
+            onDoubleClick={(e) => {
+              e.stopPropagation();
+              setSelectedShapeId(shape._id);
+              // Optionally, allow editing shape properties
+            }}
+            onMouseDown={(e) => {
+              if (selectedShapeId === shape._id) {
+                setDraggingShapeId(shape._id);
+                setDragOffsetShape({
+                  x: e.clientX - (Math.min(shape.x, shape.x2) - viewport.x),
+                  y: e.clientY - (Math.min(shape.y, shape.y2) - viewport.y),
+                });
+              }
+            }}
+          >
+            {/* Resize handle */}
+            {selectedShapeId === shape._id && (
+              <div
+                style={{
+                  position: "absolute",
+                  right: -8,
+                  bottom: -8,
+                  width: 16,
+                  height: 16,
+                  background: "#fff",
+                  border: "2px solid #007aff",
+                  borderRadius: "50%",
+                  cursor: "nwse-resize",
+                  zIndex: 21,
+                }}
+                onMouseDown={(e) => {
+                  e.stopPropagation();
+                  setResizingShapeId(shape._id);
+                }}
+              />
+            )}
+            {/* Delete button */}
+            {selectedShapeId === shape._id && (
+              <button
+                style={{
+                  position: "absolute",
+                  top: -10,
+                  right: -10,
+                  background: "#fff",
+                  border: "1px solid #e74c3c",
+                  color: "#e74c3c",
+                  borderRadius: "50%",
+                  width: 20,
+                  height: 20,
+                  fontSize: 14,
+                  cursor: "pointer",
+                  zIndex: 22,
+                }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  socket.emit("removeShape", { _id: shape._id, whiteboardId });
+                  setUndoStack((prev) => [
+                    ...prev,
+                    { type: "shape-delete", data: shape },
+                  ]);
+                  setSelectedShapeId(null);
+                }}
+                title="Delete Shape"
+              >
+                ×
+              </button>
+            )}
+          </div>
+        ))}
+        {/* Minimap */}
+        <Minimap
+          strokes={strokes}
+          textBoxes={textBoxes}
+          images={images}
+          backgroundColor={backgroundColor}
+          canvasSize={canvasSize}
+          viewport={viewport}
+          minimapSize={minimapSize}
+          onMinimapClick={handleMinimapMoveViewport}
+        />
+        {/* No canvas border/line here */}
       </div>
       {/* Chatbox at the bottom */}
       {openPanel === "chat" && (
